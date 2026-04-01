@@ -1,0 +1,187 @@
+# Product Requirements Document
+# CampusFlow — AI-Powered Student Productivity App
+
+**Version:** 3.0 (MVP)
+**Date:** March 26, 2026
+**Status:** Active
+
+---
+
+## 1. Overview
+
+College students are overwhelmed. Too many tasks, no clear system, and no tool that understands academic life. **CampusFlow** is an AI-powered Android app that helps students prioritize their work, break down big assignments into manageable steps, and stay motivated through progress tracking and gamification.
+
+---
+
+## 2. Target Users
+
+Undergraduate and graduate students managing coursework, extracurriculars, and other commitments simultaneously.
+
+---
+
+## 3. Core Features (MVP)
+
+### 3.1 Smart Prioritization & Scheduling
+
+The app automatically ranks tasks based on due date, difficulty, and the student's own past performance. It tells students not just *what* to do, but *when to start*.
+
+**Key requirements:**
+- Rank tasks using due date proximity, difficulty rating, and task type
+- Surface the top 3 priority tasks on the home screen
+- Generate a "Recommended Start Date" per task based on estimated effort and historical completion speed
+- Re-rank tasks dynamically as new tasks are added or deadlines change
+- Users can manually override any ranking
+
+---
+
+### 3.2 AI-Guided Task Breakdown
+
+For large or complex tasks, the AI generates a personalized step-by-step roadmap. This is the core AI feature of the app — students describe the assignment and the AI does the planning work.
+
+**Key requirements:**
+- User can trigger roadmap generation from any task
+- App collects context: assignment type, course, deadline, estimated length/scope
+- AI generates 3–8 ordered sub-tasks with time estimates
+- User can edit, reorder, add, or delete any sub-task
+- Sub-task completion feeds directly into progress tracking
+
+---
+
+### 3.3 Visual Progress Dashboard
+
+A clean, real-time view of the student's workload and how far along they are on each task.
+
+**Key requirements:**
+- Home screen shows today's top tasks with progress bars
+- Each task card shows: title, course, due date, time estimate, and sub-task progress
+- Progress bars update in real time as sub-tasks are completed
+- Dashboard views: Today, This Week
+- Workload overview showing how many tasks are due and how many are in progress
+
+---
+
+### 3.4 Smart Notifications
+
+Notifications that are timely, specific, and actually tell the student what to do next — not generic reminders.
+
+**Key requirements:**
+- "Time to Start" alert when a task's recommended start date arrives
+- Deadline reminders at 72 hrs, 24 hrs, and 2 hrs before due
+- Each notification references the specific task and next step (e.g., "Start your outline for Econ Paper — Step 1 of 5")
+- Users can set Focus Hours to suppress non-urgent notifications
+- Users can control notification types in Settings
+
+---
+
+### 3.5 Gamification
+
+A lightweight reward system that makes consistent progress feel satisfying.
+
+**Key requirements:**
+- Daily streak counter (increments when at least one task/sub-task is completed)
+- Achievement badges for key milestones (e.g., first task done, 7-day streak, task completed early)
+- CampusCoins earned for completing tasks and maintaining streaks
+- Coins redeemable for cosmetic app customizations (themes, icons)
+- Badge gallery in user profile showing earned and locked badges
+
+---
+
+## 4. Design Direction
+
+**Aesthetic:** Minimalist but warm — clean layouts with personality. Think a well-organized desk in a sunlit room. Never sterile, never cluttered.
+
+**Color palette:**
+- Background: Warm off-white `#FAF8F4`
+- Primary accent: Tangerine `#FF6B35` (buttons, active states, streaks)
+- Success: Sage Green `#6BCB77` (completed tasks, progress)
+- Warning: Amber `#FFA552` (approaching deadlines)
+- Danger: Coral `#EF4444` (overdue)
+- Text: Ink `#1A1A2E` (primary), Slate `#6B7280` (secondary)
+
+**Typography:**
+- Display/headings: *Fraunces* (serif, expressive)
+- Body/UI: *DM Sans* (clean, legible)
+
+**Key design rules:**
+- One primary action per screen
+- Generous whitespace — reduce cognitive load, don't add to it
+- Rounded cards (16px radius), soft shadows
+- Celebrations (confetti, animations) only on meaningful completions — not every tap
+- All copy is direct and specific: "Start your outline" not "You have a task due soon"
+
+---
+
+## 5. Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Platform | Android (Kotlin) |
+| Database | PostgreSQL via Supabase |
+| Auth | Supabase Auth |
+| AI (Roadmap Generation) | Google Gemini API or OpenAI GPT-4o |
+| Push Notifications | Firebase Cloud Messaging (FCM) |
+| Architecture | MVVM + Repository pattern |
+
+**AI integration notes:**
+- Roadmap generation is a single API call with task context as input, returning a structured list of sub-tasks
+- Prompt includes: task title, type, course, deadline, scope (e.g., word count), and user's year/major
+- Response parsed into sub-task objects stored in Supabase
+- If generation fails, user gets 3 editable template options as a fallback
+
+---
+
+## 6. User Flows
+
+### Onboarding
+1. Sign up via email or Google (Supabase Auth)
+2. Enter university, year, and major
+3. Add first 1–3 tasks (title + due date only — keep it fast)
+4. Set preferred notification times
+5. Land on home dashboard
+
+### Adding & Breaking Down a Task
+1. Tap "+" → Enter title, course, due date, difficulty
+2. Tap "Build My Plan" → App asks 2–3 quick context questions
+3. AI generates sub-task roadmap (shown within ~5 seconds)
+4. User reviews and edits → confirms
+5. Task appears on dashboard with segmented progress bar
+
+### Daily Use
+1. Open app → Today screen with top 3 priority tasks
+2. Tap a task → see sub-tasks
+3. Check off sub-tasks → progress bar updates live
+4. Complete all sub-tasks → celebration animation + coins/badge if milestone hit
+
+---
+
+## 7. Assumptions
+
+- Students will manually input tasks in the MVP (no LMS integration yet)
+- AI scheduling personalizes after ~2 weeks of usage data per user
+- All users are on Android for MVP; iOS comes later
+
+---
+
+## 8. Risks
+
+| Risk | Mitigation |
+|---|---|
+| Students don't input tasks consistently | Frictionless quick-add (title + date only, everything else optional) |
+| AI roadmap quality is poor for niche assignments | User can fully edit any generated roadmap; collect thumbs up/down feedback per roadmap |
+| Notification fatigue | User controls frequency and types; smart suppression during Focus Hours |
+| Gamification feels hollow | Badges and coins tied to meaningful milestones only, not trivial actions |
+
+---
+
+## 9. Open Questions
+
+1. Should difficulty be user-set, AI-inferred from task type, or AI-suggested with user confirmation?
+2. How do we handle recurring tasks (e.g., weekly readings)?
+3. Should peak productivity hours be manually set by the user or passively inferred from usage patterns?
+4. Should the AI roadmap generation use a fixed prompt or adapt based on the user's academic history over time?
+
+---
+
+*Document Owner: Product Team*
+*Version: 3.0 (MVP)*
+*Last Updated: March 26, 2026*

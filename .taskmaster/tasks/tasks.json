@@ -1,0 +1,825 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Set Up Project Structure",
+        "description": "Initialize the Android project with the necessary dependencies and configurations.",
+        "details": "Create a new Android project in Android Studio using Kotlin. Set up Gradle dependencies for Supabase, Firebase Cloud Messaging, and any other required libraries. Configure the MVVM architecture and Repository pattern.",
+        "testStrategy": "Verify project builds successfully and runs on an emulator.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create New Android Project",
+            "description": "Initialize a new Android project in Android Studio using Kotlin as the primary language.",
+            "dependencies": [],
+            "details": "Open Android Studio and select 'New Project'. Choose 'Empty Activity', set the project name, package name, and select Kotlin as the language. Configure minimum SDK and finish the setup.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Set Up Gradle Dependencies",
+            "description": "Add necessary dependencies for Supabase, Firebase Cloud Messaging, and other libraries in the Gradle files.",
+            "dependencies": [
+              1
+            ],
+            "details": "Open the build.gradle (app) file and add dependencies for Supabase, Firebase Cloud Messaging, and any other required libraries. Sync the project after adding dependencies.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Configure MVVM Architecture",
+            "description": "Set up the MVVM architecture for the project to ensure a clean separation of concerns.",
+            "dependencies": [
+              2
+            ],
+            "details": "Create necessary packages for ViewModels, Models, and Repositories. Implement the basic structure of MVVM by creating a sample ViewModel and linking it to an Activity or Fragment.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Implement Repository Pattern",
+            "description": "Establish the Repository pattern to manage data operations and provide a clean API for data access.",
+            "dependencies": [
+              3
+            ],
+            "details": "Create a Repository class that will handle data operations, including fetching data from Supabase. Ensure it interacts with the ViewModel appropriately.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Verify Project Build and Run",
+            "description": "Ensure that the project builds successfully and runs on an emulator without errors.",
+            "dependencies": [
+              4
+            ],
+            "details": "Run the project on an Android emulator to verify that it builds correctly. Check for any build errors and resolve them before proceeding.",
+            "status": "pending",
+            "testStrategy": "Test the build process and run the app on an emulator to confirm functionality."
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Implement User Authentication",
+        "description": "Integrate Supabase Auth for user sign-up and login functionalities.",
+        "details": "Use Supabase Auth to allow users to sign up via email or Google. Implement UI for authentication and handle user sessions.",
+        "testStrategy": "Test user registration and login flows, ensuring users can access their accounts.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Set Up Supabase Project",
+            "description": "Create a new Supabase project and configure authentication settings.",
+            "dependencies": [],
+            "details": "Sign up for Supabase, create a new project, and enable email and Google authentication in the settings. Document the project URL and API keys for integration.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement Email Sign-Up Functionality",
+            "description": "Develop the user interface and backend logic for email sign-up using Supabase Auth.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create a sign-up form in the UI that captures user email and password. Use Supabase's API to handle user registration and provide feedback on success or failure.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Implement Google Sign-In Functionality",
+            "description": "Integrate Google sign-in option for user authentication using Supabase.",
+            "dependencies": [
+              1
+            ],
+            "details": "Add a button for Google sign-in on the authentication UI. Use Supabase's Google OAuth integration to authenticate users and manage sessions accordingly.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Handle User Sessions",
+            "description": "Implement session management to keep users logged in and manage their sessions.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Use Supabase's session management features to track user login status. Ensure that users remain logged in across sessions and can log out successfully.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Test Authentication Flows",
+            "description": "Conduct thorough testing of the user authentication flows for both email and Google sign-in.",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "Create test cases for user registration, login, and session management. Ensure that all flows work as expected and handle edge cases like incorrect credentials.",
+            "status": "pending",
+            "testStrategy": null
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Create Task Model and Database Schema",
+        "description": "Define the data model for tasks and set up the PostgreSQL database schema in Supabase.",
+        "details": "Create a Task model with fields for title, due date, difficulty, and status. Set up the corresponding table in Supabase.",
+        "testStrategy": "Verify that tasks can be created, read, updated, and deleted in the database.",
+        "priority": "medium",
+        "dependencies": [
+          1
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Define Task Model Fields",
+            "description": "Identify and define the fields required for the Task model, including title, due date, difficulty, and status.",
+            "dependencies": [],
+            "details": "Create a detailed specification for the Task model, ensuring all necessary fields are included and properly typed for the PostgreSQL database.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Create PostgreSQL Table Schema",
+            "description": "Set up the PostgreSQL table schema in Supabase based on the defined Task model.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use Supabase SQL editor to create a table named 'tasks' with columns for title, due date, difficulty, and status, ensuring correct data types and constraints are applied.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Implement CRUD Operations",
+            "description": "Develop the Create, Read, Update, and Delete (CRUD) operations for the Task model in Supabase.",
+            "dependencies": [
+              2
+            ],
+            "details": "Write functions to handle CRUD operations for the Task model, ensuring they interact correctly with the Supabase database and handle errors appropriately.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Test Database Functionality",
+            "description": "Verify that the CRUD operations for the Task model work as intended in the Supabase database.",
+            "dependencies": [
+              3
+            ],
+            "details": "Conduct tests to ensure that tasks can be created, read, updated, and deleted successfully, and validate the data integrity in the database.",
+            "status": "pending",
+            "testStrategy": "Perform unit tests for each CRUD operation and integration tests to ensure overall functionality."
+          },
+          {
+            "id": 5,
+            "title": "Document Task Model and Schema",
+            "description": "Create documentation for the Task model and its corresponding database schema.",
+            "dependencies": [
+              4
+            ],
+            "details": "Write comprehensive documentation that outlines the Task model fields, database schema, and usage examples for future reference and development.",
+            "status": "pending",
+            "testStrategy": null
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Develop Smart Prioritization Algorithm",
+        "description": "Implement the algorithm to rank tasks based on due date, difficulty, and past performance.",
+        "details": "Create a function that takes a list of tasks and ranks them based on the specified criteria. Ensure it can dynamically update rankings.",
+        "testStrategy": "Unit test the ranking function with various task scenarios to ensure correct prioritization.",
+        "priority": "high",
+        "dependencies": [
+          3
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Define Task Ranking Criteria",
+            "description": "Establish the criteria for ranking tasks based on due date, difficulty, and past performance.",
+            "dependencies": [],
+            "details": "Create a document outlining how each criterion will be measured and weighted in the ranking algorithm. Include examples of tasks to illustrate the criteria.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement Ranking Function",
+            "description": "Develop the core function that will rank tasks according to the defined criteria.",
+            "dependencies": [
+              1
+            ],
+            "details": "Write a function that accepts a list of tasks and returns them sorted based on the established ranking criteria. Ensure the function is efficient and can handle large datasets.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Integrate Dynamic Updates",
+            "description": "Modify the ranking function to allow for dynamic updates as task attributes change.",
+            "dependencies": [
+              2
+            ],
+            "details": "Implement a mechanism that re-evaluates and updates the task rankings whenever a task's due date, difficulty, or past performance is modified. Ensure this is efficient and does not require a full re-evaluation of all tasks.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Unit Test Ranking Function",
+            "description": "Create unit tests for the ranking function to validate its accuracy and performance.",
+            "dependencies": [
+              3
+            ],
+            "details": "Develop a suite of unit tests that cover various scenarios, including edge cases, to ensure the ranking function behaves as expected. Use a testing framework suitable for the programming language being used.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Document Algorithm Usage",
+            "description": "Write documentation on how to use the smart prioritization algorithm within the project.",
+            "dependencies": [
+              4
+            ],
+            "details": "Create comprehensive documentation that explains how to integrate and use the ranking function in the project. Include examples and potential use cases to guide developers.",
+            "status": "pending",
+            "testStrategy": null
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Build Home Screen UI",
+        "description": "Design and implement the home screen to display the top 3 priority tasks.",
+        "details": "Create a minimalist UI that shows the top 3 tasks with their titles, due dates, and progress bars. Use the ranking algorithm to populate this view.",
+        "testStrategy": "Conduct user testing to ensure the UI is intuitive and displays the correct tasks.",
+        "priority": "medium",
+        "dependencies": [
+          2,
+          4
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Design Home Screen Layout",
+            "description": "Create a wireframe and design for the home screen layout that displays the top 3 priority tasks.",
+            "dependencies": [],
+            "details": "Use design tools like Figma or Sketch to create a minimalist layout that includes sections for task titles, due dates, and progress bars.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement UI Components",
+            "description": "Develop the UI components for displaying task titles, due dates, and progress bars.",
+            "dependencies": [
+              1
+            ],
+            "details": "Utilize a UI framework like React or Vue.js to build components that will render the task information dynamically.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Integrate Ranking Algorithm",
+            "description": "Implement the ranking algorithm to determine the top 3 priority tasks to display on the home screen.",
+            "dependencies": [
+              2
+            ],
+            "details": "Ensure the algorithm fetches tasks from the database and ranks them based on priority and due dates before rendering.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Add Progress Bar Functionality",
+            "description": "Implement progress bars for each task to visually represent their completion status.",
+            "dependencies": [
+              3
+            ],
+            "details": "Use a library or custom code to create progress bars that update based on task completion percentages.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Conduct User Testing",
+            "description": "Perform user testing to evaluate the usability and functionality of the home screen UI.",
+            "dependencies": [
+              4
+            ],
+            "details": "Gather feedback from users to ensure the UI is intuitive and correctly displays the top 3 tasks as intended.",
+            "status": "pending",
+            "testStrategy": "Conduct usability testing sessions and collect user feedback."
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Implement AI-Guided Task Breakdown",
+        "description": "Integrate AI functionality to generate a roadmap for complex tasks.",
+        "details": "Use Google Gemini API or OpenAI GPT-4o to generate sub-tasks based on user input. Implement the API call and handle responses.",
+        "testStrategy": "Test the AI integration with various task inputs and ensure the generated roadmaps are logical and editable.",
+        "priority": "high",
+        "dependencies": [
+          3
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Research AI APIs for Task Breakdown",
+            "description": "Investigate Google Gemini API and OpenAI GPT-4o to determine the best fit for generating subtasks.",
+            "dependencies": [],
+            "details": "Analyze the documentation and capabilities of both Google Gemini API and OpenAI GPT-4o to understand their strengths and limitations for task breakdown.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement API Call for AI Integration",
+            "description": "Develop the functionality to call the selected AI API for generating subtasks based on user input.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create a function that makes an API request to the chosen AI service, sending user input and handling the response appropriately.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Handle API Responses and Generate Subtasks",
+            "description": "Process the API responses to extract generated subtasks and format them for the application.",
+            "dependencies": [
+              2
+            ],
+            "details": "Implement logic to parse the API response, extract relevant subtask information, and create subtask objects in the application.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Integrate Subtask Generation into User Interface",
+            "description": "Update the user interface to allow users to input tasks and view generated subtasks from the AI.",
+            "dependencies": [
+              3
+            ],
+            "details": "Modify the UI components to include input fields for task descriptions and a display area for the generated subtasks, ensuring a smooth user experience.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Test AI Integration and Subtask Logic",
+            "description": "Conduct tests to ensure the AI integration works correctly and the generated subtasks are logical and editable.",
+            "dependencies": [
+              4
+            ],
+            "details": "Create test cases that cover various user inputs and validate that the generated subtasks meet the expected criteria for logic and editability.",
+            "status": "pending",
+            "testStrategy": "Test the AI integration with various task inputs and ensure the generated roadmaps are logical and editable."
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Create Task Breakdown UI",
+        "description": "Design the UI for displaying and editing the generated sub-tasks.",
+        "details": "Implement a UI that allows users to view, edit, reorder, and delete sub-tasks. Ensure it integrates with the main task.",
+        "testStrategy": "Conduct usability testing to ensure users can easily manipulate sub-tasks.",
+        "priority": "medium",
+        "dependencies": [
+          6
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Design UI Wireframes",
+            "description": "Create wireframes for the task breakdown UI to visualize layout and functionality.",
+            "dependencies": [],
+            "details": "Use design tools like Figma or Sketch to create wireframes that outline the user interface for viewing, editing, reordering, and deleting sub-tasks. Ensure the design is user-friendly and aligns with the overall application style.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Develop Task List Component",
+            "description": "Implement the component that displays the list of sub-tasks in the UI.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create a reusable component in the chosen framework (e.g., React, Angular) that fetches and displays the list of sub-tasks. Ensure it supports dynamic updates when sub-tasks are added or removed.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Implement Edit and Delete Functionality",
+            "description": "Add functionality to edit and delete sub-tasks from the UI.",
+            "dependencies": [
+              2
+            ],
+            "details": "Integrate edit and delete buttons for each sub-task in the task list component. Ensure that editing updates the UI in real-time and that deleted tasks are removed from the display immediately.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Add Reordering Feature",
+            "description": "Implement drag-and-drop functionality to reorder sub-tasks in the UI.",
+            "dependencies": [
+              3
+            ],
+            "details": "Utilize a library or framework feature that supports drag-and-drop to allow users to reorder sub-tasks. Ensure that the new order is saved and reflected in the database.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Conduct Usability Testing",
+            "description": "Test the UI with users to ensure it meets their needs and is easy to use.",
+            "dependencies": [
+              4
+            ],
+            "details": "Organize a usability testing session with potential users to gather feedback on the task breakdown UI. Focus on the ease of use for viewing, editing, reordering, and deleting sub-tasks.",
+            "status": "pending",
+            "testStrategy": "Collect user feedback and observe interactions to identify any usability issues."
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Develop Visual Progress Dashboard",
+        "description": "Create a dashboard that visually represents task progress and workload.",
+        "details": "Implement a dashboard that shows today's tasks with progress bars and a workload overview. Ensure real-time updates as tasks are completed.",
+        "testStrategy": "Test the dashboard for accuracy in displaying task progress and workload.",
+        "priority": "medium",
+        "dependencies": [
+          5,
+          7
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Design Dashboard Layout",
+            "description": "Create a wireframe for the visual progress dashboard layout.",
+            "dependencies": [],
+            "details": "Use design tools like Figma or Sketch to create a wireframe that outlines the layout of the dashboard, including sections for today's tasks, progress bars, and workload overview.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement Task Progress Bars",
+            "description": "Develop the functionality to display progress bars for each task on the dashboard.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use a front-end framework like React or Vue.js to create progress bars that visually represent the completion percentage of each task based on their status.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Create Workload Overview Section",
+            "description": "Build a section that summarizes the overall workload on the dashboard.",
+            "dependencies": [
+              1
+            ],
+            "details": "Implement a component that aggregates the number of tasks and their statuses to provide a quick overview of the workload, using charts or simple statistics.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Integrate Real-Time Updates",
+            "description": "Ensure the dashboard updates in real-time as tasks are completed.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Utilize WebSockets or a similar technology to push updates to the dashboard whenever a task's status changes, ensuring users see the most current information.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Test Dashboard Functionality",
+            "description": "Conduct thorough testing of the dashboard to ensure all features work as intended.",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "Perform unit tests and user acceptance testing to verify that the dashboard displays task progress accurately and updates in real-time as tasks are completed.",
+            "status": "pending",
+            "testStrategy": "Test the dashboard for accuracy in displaying task progress and workload."
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Implement Smart Notifications",
+        "description": "Create a notification system for task reminders and alerts.",
+        "details": "Use Firebase Cloud Messaging to send notifications for task reminders based on user-defined settings and task deadlines.",
+        "testStrategy": "Test notification delivery for various scenarios and ensure they are timely and relevant.",
+        "priority": "high",
+        "dependencies": [
+          2
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Set Up Firebase Cloud Messaging",
+            "description": "Configure Firebase Cloud Messaging (FCM) for the project to enable push notifications.",
+            "dependencies": [],
+            "details": "Create a Firebase project and enable Cloud Messaging. Obtain the necessary API keys and configure them in the application settings.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Implement Notification Scheduling Logic",
+            "description": "Develop the logic to schedule notifications based on user-defined settings and task deadlines.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create a function that checks user settings and schedules notifications accordingly. Ensure it can handle multiple tasks and deadlines.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Create Notification Payload Structure",
+            "description": "Define the structure of the notification payload to be sent via FCM.",
+            "dependencies": [
+              1
+            ],
+            "details": "Design the JSON structure for notifications, including title, body, and any additional data needed for the app.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Integrate Notification Sending Functionality",
+            "description": "Implement the function to send notifications using FCM when tasks are due.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Use the FCM API to send notifications based on the scheduled tasks. Ensure error handling is in place for failed notifications.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Test Notification Delivery and Timing",
+            "description": "Conduct tests to ensure notifications are delivered correctly and on time.",
+            "dependencies": [
+              4
+            ],
+            "details": "Create test cases for various scenarios, including different user settings and task deadlines. Verify that notifications are timely and relevant.",
+            "status": "pending",
+            "testStrategy": null
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Integrate Gamification Features",
+        "description": "Develop a system for tracking user progress and rewarding achievements.",
+        "details": "Implement a daily streak counter, achievement badges, and CampusCoins system. Ensure rewards are meaningful and tied to task completion.",
+        "testStrategy": "Test the gamification features to ensure they trigger correctly and provide appropriate rewards.",
+        "priority": "medium",
+        "dependencies": [
+          8
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Daily Streak Counter",
+            "description": "Create a system to track and display the user's daily streak of completed tasks.",
+            "dependencies": [],
+            "details": "Develop a function that checks the completion of tasks daily and increments the streak counter. Store the streak data in the database and ensure it resets after a missed day.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Design Achievement Badges",
+            "description": "Create a set of achievement badges that users can earn based on their progress and milestones.",
+            "dependencies": [],
+            "details": "Design various badges that represent different achievements. Implement logic to award badges when users reach specific milestones, such as completing a certain number of tasks.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Develop CampusCoins System",
+            "description": "Implement a virtual currency system (CampusCoins) that rewards users for completing tasks and achieving milestones.",
+            "dependencies": [],
+            "details": "Create a currency system where users earn CampusCoins for task completions and achievements. Ensure that the coins can be displayed in the user profile and can be redeemed for rewards.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Integrate Reward Mechanism",
+            "description": "Link the rewards system to task completion and user achievements to ensure meaningful rewards.",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Develop a mechanism that triggers rewards when users complete tasks or earn badges. Ensure that the rewards are meaningful and encourage continued engagement.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Test Gamification Features",
+            "description": "Conduct thorough testing of the gamification features to ensure they function correctly and provide appropriate rewards.",
+            "dependencies": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "details": "Create test cases to verify that the daily streak counter, achievement badges, and CampusCoins system work as intended. Ensure that rewards are triggered correctly based on user actions.",
+            "status": "pending",
+            "testStrategy": null
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "Conduct User Testing and Feedback Collection",
+        "description": "Gather user feedback on the app's functionality and usability.",
+        "details": "Conduct user testing sessions to gather feedback on the app's features and usability. Use this feedback to make necessary adjustments.",
+        "testStrategy": "Analyze user feedback and implement changes based on common pain points and suggestions.",
+        "priority": "medium",
+        "dependencies": [
+          5,
+          8,
+          10
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Define User Testing Objectives",
+            "description": "Establish clear objectives for what the user testing sessions aim to achieve.",
+            "dependencies": [],
+            "details": "Identify key areas of the app that need feedback, such as usability, functionality, and user experience. Document these objectives to guide the testing sessions.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 2,
+            "title": "Recruit Test Participants",
+            "description": "Find and recruit users who will participate in the testing sessions.",
+            "dependencies": [],
+            "details": "Create a list of criteria for selecting participants, such as demographics and familiarity with similar apps. Use social media and user forums to recruit a diverse group of testers.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 3,
+            "title": "Conduct User Testing Sessions",
+            "description": "Facilitate sessions where users interact with the app and provide feedback.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Schedule and conduct testing sessions, ensuring participants are comfortable and understand the tasks they need to complete. Record sessions for later analysis.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 4,
+            "title": "Analyze User Feedback",
+            "description": "Review and analyze the feedback collected from user testing sessions.",
+            "dependencies": [
+              3
+            ],
+            "details": "Compile feedback into a report, categorizing comments by theme and identifying common pain points. Use this analysis to inform necessary adjustments to the app.",
+            "status": "pending",
+            "testStrategy": null
+          },
+          {
+            "id": 5,
+            "title": "Implement Changes Based on Feedback",
+            "description": "Make necessary adjustments to the app based on user feedback.",
+            "dependencies": [
+              4
+            ],
+            "details": "Prioritize changes based on user feedback and implement them in the app. Ensure that adjustments improve usability and functionality as intended.",
+            "status": "pending",
+            "testStrategy": null
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Prepare for Launch",
+        "description": "Finalize the app for deployment and prepare marketing materials.",
+        "details": "Ensure all features are functioning as intended, prepare app store listings, and create promotional materials for launch.",
+        "testStrategy": "Conduct a final review of the app and marketing materials to ensure readiness for launch.",
+        "priority": "high",
+        "dependencies": [
+          11
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Conduct Final Feature Review",
+            "description": "Review all app features to ensure they are functioning as intended before launch.",
+            "dependencies": [],
+            "details": "Test each feature of the app thoroughly to confirm that they work correctly and meet the specifications outlined in the project requirements.",
+            "status": "pending",
+            "testStrategy": "Perform manual testing and automated tests to validate feature functionality."
+          },
+          {
+            "id": 2,
+            "title": "Prepare App Store Listings",
+            "description": "Create and finalize app store listings for both iOS and Android platforms.",
+            "dependencies": [
+              1
+            ],
+            "details": "Gather all necessary information including app descriptions, screenshots, and promotional videos. Ensure compliance with app store guidelines.",
+            "status": "pending",
+            "testStrategy": "Review listings for accuracy and completeness before submission."
+          },
+          {
+            "id": 3,
+            "title": "Create Promotional Materials",
+            "description": "Design and produce marketing materials for the app launch.",
+            "dependencies": [
+              1
+            ],
+            "details": "Develop graphics, social media posts, and other promotional content to generate interest in the app prior to launch.",
+            "status": "pending",
+            "testStrategy": "Gather feedback on promotional materials from team members and revise as necessary."
+          },
+          {
+            "id": 4,
+            "title": "Finalize Launch Strategy",
+            "description": "Develop a comprehensive strategy for the app launch including timelines and channels.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Outline the launch timeline, identify key marketing channels, and assign responsibilities to team members for execution.",
+            "status": "pending",
+            "testStrategy": "Review the launch strategy with stakeholders to ensure alignment and readiness."
+          },
+          {
+            "id": 5,
+            "title": "Conduct Final Review Meeting",
+            "description": "Hold a meeting with the team to review all preparations for the app launch.",
+            "dependencies": [
+              4
+            ],
+            "details": "Discuss the status of all subtasks, address any last-minute issues, and confirm that everyone is prepared for the launch.",
+            "status": "pending",
+            "testStrategy": "Document meeting outcomes and action items to ensure accountability."
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "created": "2026-03-26T21:57:36.346Z",
+      "updated": "2026-03-26T21:57:36.346Z",
+      "description": "Tasks for master context"
+    }
+  }
+}
