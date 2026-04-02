@@ -2,7 +2,7 @@
 
 **Title:** Set Up Project Structure
 
-**Status:** pending
+**Status:** done
 
 **Dependencies:** None
 
@@ -22,7 +22,7 @@ Verify project builds successfully and runs on an emulator.
 
 ### 1.1. Create New Android Project
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** None  
 
 Initialize a new Android project in Android Studio using Kotlin as the primary language.
@@ -33,7 +33,7 @@ Open Android Studio and select 'New Project'. Choose 'Empty Activity', set the p
 
 ### 1.2. Set Up Gradle Dependencies
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 1.1  
 
 Add necessary dependencies for Supabase, Firebase Cloud Messaging, and other libraries in the Gradle files.
@@ -44,7 +44,7 @@ Open the build.gradle (app) file and add dependencies for Supabase, Firebase Clo
 
 ### 1.3. Configure MVVM Architecture
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 1.2  
 
 Set up the MVVM architecture for the project to ensure a clean separation of concerns.
@@ -55,7 +55,7 @@ Create necessary packages for ViewModels, Models, and Repositories. Implement th
 
 ### 1.4. Implement Repository Pattern
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 1.3  
 
 Establish the Repository pattern to manage data operations and provide a clean API for data access.
@@ -66,7 +66,7 @@ Create a Repository class that will handle data operations, including fetching d
 
 ### 1.5. Verify Project Build and Run
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 1.4  
 
 Ensure that the project builds successfully and runs on an emulator without errors.
