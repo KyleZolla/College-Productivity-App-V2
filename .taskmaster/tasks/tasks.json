@@ -108,9 +108,10 @@
               1
             ],
             "details": "Create a sign-up form in the UI that captures user email and password. Use Supabase's API to handle user registration and provide feedback on success or failure.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": null,
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2026-04-02T01:46:55.425Z"
           },
           {
             "id": 3,
@@ -152,7 +153,7 @@
             "parentId": "undefined"
           }
         ],
-        "updatedAt": "2026-04-02T00:40:48.514Z"
+        "updatedAt": "2026-04-02T01:46:55.425Z"
       },
       {
         "id": "3",
@@ -886,7 +887,7 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-04-02T00:40:48.517Z",
+      "lastModified": "2026-04-02T01:46:55.428Z",
       "taskCount": 12,
       "completedCount": 1,
       "tags": [

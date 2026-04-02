@@ -1,6 +1,7 @@
 package com.example.productivityapp
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Patterns
 import android.widget.Button
@@ -33,6 +34,7 @@ class LoginActivity : AppCompatActivity() {
         val emailInput = findViewById<EditText>(R.id.loginEmailInput)
         val passwordInput = findViewById<EditText>(R.id.loginPasswordInput)
         val logInButton = findViewById<Button>(R.id.logInButton)
+        val googleLogInButton = findViewById<Button>(R.id.googleLogInButton)
         val goToSignUpButton = findViewById<Button>(R.id.goToSignUpButton)
         val statusText = findViewById<TextView>(R.id.loginStatusText)
 
@@ -44,6 +46,19 @@ class LoginActivity : AppCompatActivity() {
             startActivity(Intent(this, MainActivity::class.java))
             finish()
         }
+
+        googleLogInButton.setOnClickListener {
+            launchGoogleOAuth(statusText)
+        }
+
+        applyOAuthStatusFromIntent(intent, statusText)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val statusText = findViewById<TextView>(R.id.loginStatusText)
+        applyOAuthStatusFromIntent(intent, statusText)
     }
 
     override fun onDestroy() {
@@ -127,5 +142,28 @@ class LoginActivity : AppCompatActivity() {
         } catch (_: Exception) {
             if (responseBody.isBlank()) "Unknown error" else responseBody
         }
+    }
+
+    private fun launchGoogleOAuth(statusText: TextView) {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            statusText.text = getString(R.string.status_missing_config)
+            return
+        }
+
+        val redirectTo = Uri.encode(getString(R.string.oauth_redirect_url))
+        val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/authorize?provider=google&redirect_to=$redirectTo&flow_type=implicit"
+        statusText.text = getString(R.string.status_google_opening)
+
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
+        } catch (_: Exception) {
+            statusText.text = getString(R.string.status_google_failed)
+        }
+    }
+
+    private fun applyOAuthStatusFromIntent(intent: Intent, statusText: TextView) {
+        val message = intent.getStringExtra("oauth_result_message") ?: return
+        statusText.text = message
+        intent.removeExtra("oauth_result_message")
     }
 }

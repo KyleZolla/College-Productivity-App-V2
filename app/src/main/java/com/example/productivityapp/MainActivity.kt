@@ -1,6 +1,7 @@
 package com.example.productivityapp
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Patterns
 import android.widget.Button
@@ -33,6 +34,7 @@ class MainActivity : AppCompatActivity() {
         val emailInput = findViewById<EditText>(R.id.emailInput)
         val passwordInput = findViewById<EditText>(R.id.passwordInput)
         val signUpButton = findViewById<Button>(R.id.signUpButton)
+        val googleSignInButton = findViewById<Button>(R.id.googleSignInButton)
         val goToLoginButton = findViewById<Button>(R.id.goToLoginButton)
         val statusText = findViewById<TextView>(R.id.statusText)
 
@@ -42,6 +44,10 @@ class MainActivity : AppCompatActivity() {
 
         goToLoginButton.setOnClickListener {
             startActivity(Intent(this, LoginActivity::class.java))
+        }
+
+        googleSignInButton.setOnClickListener {
+            launchGoogleOAuth(statusText)
         }
     }
 
@@ -139,6 +145,23 @@ class MainActivity : AppCompatActivity() {
                 .ifBlank { "Unknown error" }
         } catch (_: Exception) {
             if (responseBody.isBlank()) "Unknown error" else responseBody
+        }
+    }
+
+    private fun launchGoogleOAuth(statusText: TextView) {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            statusText.text = getString(R.string.status_missing_config)
+            return
+        }
+
+        val redirectTo = Uri.encode(getString(R.string.oauth_redirect_url))
+        val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/authorize?provider=google&redirect_to=$redirectTo&flow_type=implicit"
+        statusText.text = getString(R.string.status_google_opening)
+
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
+        } catch (_: Exception) {
+            statusText.text = getString(R.string.status_google_failed)
         }
     }
 }

@@ -2,7 +2,7 @@
 
 **Title:** Implement User Authentication
 
-**Status:** pending
+**Status:** in-progress
 
 **Dependencies:** 1 ✓
 
@@ -22,7 +22,7 @@ Test user registration and login flows, ensuring users can access their accounts
 
 ### 2.1. Set Up Supabase Project
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** None  
 
 Create a new Supabase project and configure authentication settings.
@@ -33,7 +33,7 @@ Sign up for Supabase, create a new project, and enable email and Google authenti
 
 ### 2.2. Implement Email Sign-Up Functionality
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 2.1  
 
 Develop the user interface and backend logic for email sign-up using Supabase Auth.
