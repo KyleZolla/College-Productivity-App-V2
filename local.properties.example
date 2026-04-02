@@ -1,0 +1,8 @@
+## Copy this file to local.properties and keep real values local.
+## local.properties is gitignored.
+## Keep existing SDK path line if Android Studio generated one.
+## Example:
+## sdk.dir=C\:\\Users\\<you>\\AppData\\Local\\Android\\Sdk
+
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-anon-key

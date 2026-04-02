@@ -87,7 +87,7 @@
         "dependencies": [
           "1"
         ],
-        "status": "pending",
+        "status": "in-progress",
         "subtasks": [
           {
             "id": 1,
@@ -95,9 +95,10 @@
             "description": "Create a new Supabase project and configure authentication settings.",
             "dependencies": [],
             "details": "Sign up for Supabase, create a new project, and enable email and Google authentication in the settings. Document the project URL and API keys for integration.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": null,
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2026-04-02T00:40:48.514Z"
           },
           {
             "id": 2,
@@ -150,7 +151,8 @@
             "testStrategy": null,
             "parentId": "undefined"
           }
-        ]
+        ],
+        "updatedAt": "2026-04-02T00:40:48.514Z"
       },
       {
         "id": "3",
@@ -884,7 +886,7 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-04-02T00:02:03.410Z",
+      "lastModified": "2026-04-02T00:40:48.517Z",
       "taskCount": 12,
       "completedCount": 1,
       "tags": [

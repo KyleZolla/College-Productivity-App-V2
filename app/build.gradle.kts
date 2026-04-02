@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
 }
+
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.inputStream().use { localProps.load(it) }
+}
+
+val supabaseUrl = localProps.getProperty("SUPABASE_URL", "")
+val supabaseAnonKey = localProps.getProperty("SUPABASE_ANON_KEY", "")
 
 android {
     namespace = "com.example.productivityapp"
@@ -15,6 +26,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
     }
 
     buildTypes {
@@ -32,6 +45,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+    }
+    buildFeatures {
+        buildConfig = true
     }
 }
 
