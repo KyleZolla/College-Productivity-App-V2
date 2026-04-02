@@ -55,7 +55,7 @@ Add a button for Google sign-in on the authentication UI. Use Supabase's Google 
 
 ### 2.4. Handle User Sessions
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 2.2, 2.3  
 
 Implement session management to keep users logged in and manage their sessions.

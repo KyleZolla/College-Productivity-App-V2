@@ -3,7 +3,6 @@ package com.example.productivityapp
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Patterns
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -80,8 +79,8 @@ class LoginActivity : AppCompatActivity() {
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
 
-        if (!Patterns.EMAIL_ADDRESS.matcher(email).matches() || password.length < 6) {
-            statusText.text = getString(R.string.status_invalid_input)
+        if (email.isBlank() || password.isBlank()) {
+            statusText.text = getString(R.string.status_login_enter_credentials)
             return
         }
 
@@ -136,13 +135,13 @@ class LoginActivity : AppCompatActivity() {
                         startActivity(intent)
                         finish()
                     } else {
-                        statusText.text = "Login failed ($responseCode): ${parseErrorMessage(responseBody)}"
+                        statusText.text = cleanLoginError(parseErrorMessage(responseBody))
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     logInButton.isEnabled = true
-                    statusText.text = "Login failed: ${e.message ?: "Unknown error"}"
+                    statusText.text = getString(R.string.status_network_error)
                 }
             }
         }
@@ -181,5 +180,19 @@ class LoginActivity : AppCompatActivity() {
         val message = intent.getStringExtra("oauth_result_message") ?: return
         statusText.text = message
         intent.removeExtra("oauth_result_message")
+    }
+
+    private fun cleanLoginError(raw: String): String {
+        val msg = raw.lowercase()
+        return when {
+            msg.contains("invalid login credentials") -> getString(R.string.status_login_invalid)
+            msg.contains("email not confirmed") -> getString(R.string.status_login_email_not_confirmed)
+            msg.contains("rate limit") || msg.contains("too many requests") -> {
+                getString(R.string.status_rate_limited)
+            }
+            msg.contains("network") || msg.contains("timeout") -> getString(R.string.status_network_error)
+            msg == "unknown error" -> getString(R.string.status_generic_error)
+            else -> raw
+        }
     }
 }

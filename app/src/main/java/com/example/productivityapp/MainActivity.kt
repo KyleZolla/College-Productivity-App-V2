@@ -3,7 +3,6 @@ package com.example.productivityapp
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Patterns
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -38,13 +37,15 @@ class MainActivity : AppCompatActivity() {
 
         val emailInput = findViewById<EditText>(R.id.emailInput)
         val passwordInput = findViewById<EditText>(R.id.passwordInput)
+        val firstNameInput = findViewById<EditText>(R.id.firstNameInput)
+        val lastNameInput = findViewById<EditText>(R.id.lastNameInput)
         val signUpButton = findViewById<Button>(R.id.signUpButton)
         val googleSignInButton = findViewById<Button>(R.id.googleSignInButton)
         val goToLoginButton = findViewById<Button>(R.id.goToLoginButton)
         val statusText = findViewById<TextView>(R.id.statusText)
 
         signUpButton.setOnClickListener {
-            createAccount(emailInput, passwordInput, signUpButton, statusText)
+            createAccount(firstNameInput, lastNameInput, emailInput, passwordInput, signUpButton, statusText)
         }
 
         goToLoginButton.setOnClickListener {
@@ -62,17 +63,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isValidInput(email: String, password: String): Boolean {
-        return Patterns.EMAIL_ADDRESS.matcher(email).matches() && password.length >= 6
+        return AuthUtils.isValidEmailAndPassword(email, password)
     }
 
     private fun createAccount(
+        firstNameInput: EditText,
+        lastNameInput: EditText,
         emailInput: EditText,
         passwordInput: EditText,
         signUpButton: Button,
         statusText: TextView
     ) {
+        val firstName = firstNameInput.text.toString().trim()
+        val lastName = lastNameInput.text.toString().trim()
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
+
+        if (firstName.isBlank() || lastName.isBlank()) {
+            statusText.text = getString(R.string.status_name_required)
+            return
+        }
 
         if (!isValidInput(email, password)) {
             statusText.text = getString(R.string.status_invalid_input)
@@ -86,10 +96,12 @@ class MainActivity : AppCompatActivity() {
 
         statusText.text = getString(R.string.status_working)
         signUpButton.isEnabled = false
-        performSignUpRequest(email, password, signUpButton, statusText)
+        performSignUpRequest(firstName, lastName, email, password, signUpButton, statusText)
     }
 
     private fun performSignUpRequest(
+        firstName: String,
+        lastName: String,
         email: String,
         password: String,
         signUpButton: Button,
@@ -110,6 +122,12 @@ class MainActivity : AppCompatActivity() {
                 val body = JSONObject()
                     .put("email", email)
                     .put("password", password)
+                    .put(
+                        "data",
+                        JSONObject()
+                            .put("first_name", firstName)
+                            .put("last_name", lastName)
+                    )
                     .toString()
                     .toByteArray()
 
@@ -124,18 +142,37 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     signUpButton.isEnabled = true
                     if (responseCode in 200..299) {
-                        val successMessage = getString(R.string.status_success)
-                        statusText.text = successMessage
-                        Toast.makeText(this, successMessage, Toast.LENGTH_LONG).show()
+                        val payload = JSONObject(responseBody)
+                        val responseError = parseErrorMessage(responseBody)
+                        if (responseError != "Unknown error") {
+                            statusText.text = cleanSignUpError(responseError)
+                            return@runOnUiThread
+                        }
+
+                        val accessToken = payload.optString("access_token")
+                        val refreshToken = payload.optString("refresh_token")
+                        val expiresIn = if (payload.has("expires_in")) payload.optLong("expires_in") else null
+
+                        if (accessToken.isNotBlank()) {
+                            SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
+                            val intent = Intent(this, HomeActivity::class.java)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            startActivity(intent)
+                            finish()
+                            return@runOnUiThread
+                        }
+
+                        val message = getString(R.string.status_signup_check_email)
+                        statusText.text = message
+                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                     } else {
-                        val errorMessage = parseErrorMessage(responseBody)
-                        statusText.text = "Sign-up failed ($responseCode): $errorMessage"
+                        statusText.text = cleanSignUpError(parseErrorMessage(responseBody))
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     signUpButton.isEnabled = true
-                    statusText.text = "Sign-up failed: ${e.message ?: "Unknown error"}"
+                    statusText.text = getString(R.string.status_network_error)
                 }
             }
         }
@@ -150,6 +187,21 @@ class MainActivity : AppCompatActivity() {
                 .ifBlank { "Unknown error" }
         } catch (_: Exception) {
             if (responseBody.isBlank()) "Unknown error" else responseBody
+        }
+    }
+
+    private fun cleanSignUpError(raw: String): String {
+        val msg = raw.lowercase()
+        return when {
+            msg.contains("already registered") || msg.contains("already been registered") -> {
+                getString(R.string.status_signup_existing_account)
+            }
+            msg.contains("rate limit") || msg.contains("too many requests") -> {
+                getString(R.string.status_rate_limited)
+            }
+            msg.contains("network") || msg.contains("timeout") -> getString(R.string.status_network_error)
+            msg == "unknown error" -> getString(R.string.status_generic_error)
+            else -> raw
         }
     }
 

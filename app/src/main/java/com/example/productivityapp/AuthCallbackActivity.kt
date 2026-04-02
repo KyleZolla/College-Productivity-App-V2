@@ -1,7 +1,6 @@
 package com.example.productivityapp
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 
@@ -10,7 +9,7 @@ class AuthCallbackActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val data = intent?.data
-        val fragmentParams = parseFragmentParams(data?.fragment)
+        val fragmentParams = AuthUtils.parseFragmentParams(data?.fragment)
         val accessToken = fragmentParams["access_token"]
         val refreshToken = fragmentParams["refresh_token"]
         val authCode = data?.getQueryParameter("code")
@@ -38,18 +37,5 @@ class AuthCallbackActivity : AppCompatActivity() {
         }
         startActivity(destination)
         finish()
-    }
-
-    private fun parseFragmentParams(fragment: String?): Map<String, String> {
-        if (fragment.isNullOrBlank()) return emptyMap()
-        return fragment.split("&")
-            .mapNotNull { part ->
-                val idx = part.indexOf("=")
-                if (idx <= 0) return@mapNotNull null
-                val key = Uri.decode(part.substring(0, idx))
-                val value = Uri.decode(part.substring(idx + 1))
-                key to value
-            }
-            .toMap()
     }
 }
