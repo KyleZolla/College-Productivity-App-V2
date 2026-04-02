@@ -16,32 +16,33 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
-class MainActivity : AppCompatActivity() {
+class LoginActivity : AppCompatActivity() {
     private val networkExecutor = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_login)
 
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.loginRoot)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
 
-        val emailInput = findViewById<EditText>(R.id.emailInput)
-        val passwordInput = findViewById<EditText>(R.id.passwordInput)
-        val signUpButton = findViewById<Button>(R.id.signUpButton)
-        val goToLoginButton = findViewById<Button>(R.id.goToLoginButton)
-        val statusText = findViewById<TextView>(R.id.statusText)
+        val emailInput = findViewById<EditText>(R.id.loginEmailInput)
+        val passwordInput = findViewById<EditText>(R.id.loginPasswordInput)
+        val logInButton = findViewById<Button>(R.id.logInButton)
+        val goToSignUpButton = findViewById<Button>(R.id.goToSignUpButton)
+        val statusText = findViewById<TextView>(R.id.loginStatusText)
 
-        signUpButton.setOnClickListener {
-            createAccount(emailInput, passwordInput, signUpButton, statusText)
+        logInButton.setOnClickListener {
+            logIn(emailInput, passwordInput, logInButton, statusText)
         }
 
-        goToLoginButton.setOnClickListener {
-            startActivity(Intent(this, LoginActivity::class.java))
+        goToSignUpButton.setOnClickListener {
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
         }
     }
 
@@ -50,20 +51,16 @@ class MainActivity : AppCompatActivity() {
         networkExecutor.shutdownNow()
     }
 
-    private fun isValidInput(email: String, password: String): Boolean {
-        return Patterns.EMAIL_ADDRESS.matcher(email).matches() && password.length >= 6
-    }
-
-    private fun createAccount(
+    private fun logIn(
         emailInput: EditText,
         passwordInput: EditText,
-        signUpButton: Button,
+        logInButton: Button,
         statusText: TextView
     ) {
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
 
-        if (!isValidInput(email, password)) {
+        if (!Patterns.EMAIL_ADDRESS.matcher(email).matches() || password.length < 6) {
             statusText.text = getString(R.string.status_invalid_input)
             return
         }
@@ -73,20 +70,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        statusText.text = getString(R.string.status_working)
-        signUpButton.isEnabled = false
-        performSignUpRequest(email, password, signUpButton, statusText)
-    }
+        statusText.text = getString(R.string.status_login_working)
+        logInButton.isEnabled = false
 
-    private fun performSignUpRequest(
-        email: String,
-        password: String,
-        signUpButton: Button,
-        statusText: TextView
-    ) {
         networkExecutor.execute {
             try {
-                val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/signup"
+                val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/token?grant_type=password"
                 val connection = URL(authUrl).openConnection() as HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
@@ -101,7 +90,6 @@ class MainActivity : AppCompatActivity() {
                     .put("password", password)
                     .toString()
                     .toByteArray()
-
                 connection.outputStream.use { it.write(body) }
 
                 val responseCode = connection.responseCode
@@ -111,20 +99,19 @@ class MainActivity : AppCompatActivity() {
                     .orEmpty()
 
                 runOnUiThread {
-                    signUpButton.isEnabled = true
+                    logInButton.isEnabled = true
                     if (responseCode in 200..299) {
-                        val successMessage = getString(R.string.status_success)
+                        val successMessage = getString(R.string.status_login_success)
                         statusText.text = successMessage
                         Toast.makeText(this, successMessage, Toast.LENGTH_LONG).show()
                     } else {
-                        val errorMessage = parseErrorMessage(responseBody)
-                        statusText.text = "Sign-up failed ($responseCode): $errorMessage"
+                        statusText.text = "Login failed ($responseCode): ${parseErrorMessage(responseBody)}"
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    signUpButton.isEnabled = true
-                    statusText.text = "Sign-up failed: ${e.message ?: "Unknown error"}"
+                    logInButton.isEnabled = true
+                    statusText.text = "Login failed: ${e.message ?: "Unknown error"}"
                 }
             }
         }

@@ -1,12 +1,19 @@
 <resources>
     <string name="app_name">Productivity App</string>
-    <string name="auth_title">Create your account</string>
+    <string name="signup_title">Create your account</string>
+    <string name="login_title">Log in</string>
     <string name="email_hint">Email</string>
     <string name="password_hint">Password</string>
-    <string name="sign_up_button">Sign up with email</string>
+    <string name="sign_up_button">Sign up</string>
+    <string name="log_in_button">Log in</string>
+    <string name="already_have_account">Already have an account?</string>
+    <string name="need_account">Need an account?</string>
     <string name="status_idle">Enter email and password to create an account.</string>
     <string name="status_working">Creating account...</string>
     <string name="status_success">Sign-up request succeeded. Check your inbox for confirmation if enabled.</string>
+    <string name="status_login_idle">Enter your email and password to log in.</string>
+    <string name="status_login_working">Logging in...</string>
+    <string name="status_login_success">Login succeeded.</string>
     <string name="status_missing_config">Missing Supabase config in local.properties.</string>
     <string name="status_invalid_input">Enter a valid email and a password with at least 6 characters.</string>
 </resources>
