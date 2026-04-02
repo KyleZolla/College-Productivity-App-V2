@@ -121,9 +121,10 @@
               1
             ],
             "details": "Add a button for Google sign-in on the authentication UI. Use Supabase's Google OAuth integration to authenticate users and manage sessions accordingly.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": null,
-            "parentId": "undefined"
+            "parentId": "undefined",
+            "updatedAt": "2026-04-02T02:08:04.372Z"
           },
           {
             "id": 4,
@@ -153,7 +154,7 @@
             "parentId": "undefined"
           }
         ],
-        "updatedAt": "2026-04-02T01:46:55.425Z"
+        "updatedAt": "2026-04-02T02:08:04.372Z"
       },
       {
         "id": "3",
@@ -887,7 +888,7 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-04-02T01:46:55.428Z",
+      "lastModified": "2026-04-02T02:08:04.374Z",
       "taskCount": 12,
       "completedCount": 1,
       "tags": [

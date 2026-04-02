@@ -20,6 +20,10 @@
     <string name="status_google_failed">Could not open Google login. Check redirect URL setup.</string>
     <string name="status_google_success">Google login succeeded.</string>
     <string name="status_google_cancelled">Google login was cancelled or did not return a token.</string>
+    <string name="status_logged_out">Logged out successfully.</string>
     <string name="status_missing_config">Missing Supabase config in local.properties.</string>
     <string name="status_invalid_input">Enter a valid email and a password with at least 6 characters.</string>
+    <string name="home_title">Home</string>
+    <string name="home_logged_in">You are logged in.</string>
+    <string name="log_out_button">Log out</string>
 </resources>

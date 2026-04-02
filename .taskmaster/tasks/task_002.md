@@ -44,7 +44,7 @@ Create a sign-up form in the UI that captures user email and password. Use Supab
 
 ### 2.3. Implement Google Sign-In Functionality
 
-**Status:** pending  
+**Status:** done  
 **Dependencies:** 2.1  
 
 Integrate Google sign-in option for user authentication using Supabase.

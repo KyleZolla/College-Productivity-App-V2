@@ -22,6 +22,11 @@ class LoginActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (SessionManager.isLoggedIn(this)) {
+            startActivity(Intent(this, HomeActivity::class.java))
+            finish()
+            return
+        }
         enableEdgeToEdge()
         setContentView(R.layout.activity_login)
 
@@ -116,9 +121,20 @@ class LoginActivity : AppCompatActivity() {
                 runOnUiThread {
                     logInButton.isEnabled = true
                     if (responseCode in 200..299) {
+                        val payload = JSONObject(responseBody)
+                        val accessToken = payload.optString("access_token")
+                        val refreshToken = payload.optString("refresh_token")
+                        val expiresIn = if (payload.has("expires_in")) payload.optLong("expires_in") else null
+                        if (accessToken.isNotBlank()) {
+                            SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
+                        }
                         val successMessage = getString(R.string.status_login_success)
                         statusText.text = successMessage
                         Toast.makeText(this, successMessage, Toast.LENGTH_LONG).show()
+                        val intent = Intent(this, HomeActivity::class.java)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        startActivity(intent)
+                        finish()
                     } else {
                         statusText.text = "Login failed ($responseCode): ${parseErrorMessage(responseBody)}"
                     }

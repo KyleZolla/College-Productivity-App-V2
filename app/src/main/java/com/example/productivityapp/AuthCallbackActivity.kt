@@ -22,15 +22,19 @@ class AuthCallbackActivity : AppCompatActivity() {
         }
 
         if (!accessToken.isNullOrBlank()) {
-            getSharedPreferences("auth_prefs", MODE_PRIVATE).edit()
-                .putString("access_token", accessToken)
-                .putString("refresh_token", refreshToken.orEmpty())
-                .apply()
+            val expiresIn = fragmentParams["expires_in"]?.toLongOrNull()
+            SessionManager.saveSession(this, accessToken, refreshToken.orEmpty(), expiresIn)
         }
 
-        val destination = Intent(this, LoginActivity::class.java).apply {
-            putExtra("oauth_result_message", resultMessage)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val destination = if (!accessToken.isNullOrBlank() || !authCode.isNullOrBlank()) {
+            Intent(this, HomeActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            }
+        } else {
+            Intent(this, LoginActivity::class.java).apply {
+                putExtra("oauth_result_message", resultMessage)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
         }
         startActivity(destination)
         finish()

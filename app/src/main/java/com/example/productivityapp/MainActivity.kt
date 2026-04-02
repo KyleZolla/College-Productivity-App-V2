@@ -22,6 +22,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (SessionManager.isLoggedIn(this)) {
+            startActivity(Intent(this, HomeActivity::class.java))
+            finish()
+            return
+        }
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
