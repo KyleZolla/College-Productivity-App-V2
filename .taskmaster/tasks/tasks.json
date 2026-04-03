@@ -742,71 +742,70 @@
       },
       {
         "id": "11",
-        "title": "Conduct User Testing and Feedback Collection",
-        "description": "Gather user feedback on the app's functionality and usability.",
-        "details": "Conduct user testing sessions to gather feedback on the app's features and usability. Use this feedback to make necessary adjustments.",
-        "testStrategy": "Analyze user feedback and implement changes based on common pain points and suggestions.",
+        "title": "Password recovery (forgot password)",
+        "description": "Let users request a reset email and set a new password from a return link into the app.",
+        "details": "Use Supabase Auth POST /auth/v1/recover with redirect_to pointing at an app deep link (e.g. productivityapp://auth/reset). Handle the callback (fragment tokens, type=recovery), then call the user update/password API with the recovery session. Optionally host a minimal static HTTPS page that redirects custom-scheme + hash for email clients that block app links. Document Supabase redirect allowlist and email template.",
+        "testStrategy": "Request reset, open link (or simulated intent), confirm new password works for login; verify invalid/expired tokens show a clear error.",
         "priority": "medium",
         "dependencies": [
-          "5",
-          "8",
-          "10"
+          "2"
         ],
         "status": "pending",
         "subtasks": [
           {
             "id": 1,
-            "title": "Define User Testing Objectives",
-            "description": "Establish clear objectives for what the user testing sessions aim to achieve.",
+            "title": "Configure Supabase recovery redirect",
+            "description": "Allowlist redirect URL(s) and confirm email recovery template points to the chosen URL.",
             "dependencies": [],
-            "details": "Identify key areas of the app that need feedback, such as usability, functionality, and user experience. Document these objectives to guide the testing sessions.",
+            "details": "In Supabase Auth settings, add the app deep link and any optional HTTPS bridge URL to Redirect URLs. Note Site URL implications for development vs production.",
             "status": "pending",
             "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 2,
-            "title": "Recruit Test Participants",
-            "description": "Find and recruit users who will participate in the testing sessions.",
-            "dependencies": [],
-            "details": "Create a list of criteria for selecting participants, such as demographics and familiarity with similar apps. Use social media and user forums to recruit a diverse group of testers.",
+            "title": "Forgot-password entry on login",
+            "description": "UI to collect email and call recover endpoint.",
+            "dependencies": [
+              1
+            ],
+            "details": "Add Forgot password? on LoginActivity (or dialog). POST recover with apikey/Authorization headers matching existing auth REST usage; show success/error messaging without revealing whether the email exists if desired.",
             "status": "pending",
             "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 3,
-            "title": "Conduct User Testing Sessions",
-            "description": "Facilitate sessions where users interact with the app and provide feedback.",
+            "title": "Deep link handler for reset session",
+            "description": "Activity/intent-filter to receive reset link and parse tokens.",
             "dependencies": [
-              1,
-              2
+              1
             ],
-            "details": "Schedule and conduct testing sessions, ensuring participants are comfortable and understand the tasks they need to complete. Record sessions for later analysis.",
+            "details": "Reuse or extend AuthUtils/AuthCallbackActivity pattern: parse URL fragment for access_token, refresh_token, type; distinguish recovery from OAuth; save session or pass tokens to reset screen.",
             "status": "pending",
             "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 4,
-            "title": "Analyze User Feedback",
-            "description": "Review and analyze the feedback collected from user testing sessions.",
+            "title": "In-app set new password screen",
+            "description": "New password + confirm, submit with recovery session.",
             "dependencies": [
               3
             ],
-            "details": "Compile feedback into a report, categorizing comments by theme and identifying common pain points. Use this analysis to inform necessary adjustments to the app.",
+            "details": "Call Supabase user update (password) with Bearer access token from recovery flow; then clear recovery UX and route to login or home per product choice.",
             "status": "pending",
             "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 5,
-            "title": "Implement Changes Based on Feedback",
-            "description": "Make necessary adjustments to the app based on user feedback.",
+            "title": "Optional static redirect page",
+            "description": "Host a one-file HTML redirect for stubborn email clients.",
             "dependencies": [
-              4
+              1
             ],
-            "details": "Prioritize changes based on user feedback and implement them in the app. Ensure that adjustments improve usability and functionality as intended.",
+            "details": "If needed, deploy minimal page on GitHub Pages or similar that forwards location.hash to the app custom scheme; add that HTTPS URL to Supabase allowlist.",
             "status": "pending",
             "testStrategy": null,
             "parentId": "undefined"
@@ -815,73 +814,137 @@
       },
       {
         "id": "12",
-        "title": "Prepare for Launch",
-        "description": "Finalize the app for deployment and prepare marketing materials.",
-        "details": "Ensure all features are functioning as intended, prepare app store listings, and create promotional materials for launch.",
-        "testStrategy": "Conduct a final review of the app and marketing materials to ensure readiness for launch.",
+        "title": "Security hardening",
+        "description": "Reduce risk around secrets, sessions, transport, and release builds.",
+        "details": "Audit how Supabase anon key and URLs are packaged; prefer BuildConfig/local properties and never commit secrets. Review EncryptedSharedPreferences or Android Keystore for tokens if elevating beyond basic SharedPreferences. Enable R8/ProGuard rules for release, network security config (cleartext off), dependency updates. Align Supabase Row Level Security with app roles. Document threat model briefly.",
+        "testStrategy": "Release build smoke test; verify no secrets in VCS; optional static analysis (lint, dependency check); validate RLS with anon key in SQL editor.",
         "priority": "high",
         "dependencies": [
-          "11"
+          "1",
+          "2"
         ],
         "status": "pending",
         "subtasks": [
           {
             "id": 1,
-            "title": "Conduct Final Feature Review",
-            "description": "Review all app features to ensure they are functioning as intended before launch.",
+            "title": "Secrets and config audit",
+            "description": "Ensure keys and env files stay out of git and are documented for teammates.",
             "dependencies": [],
-            "details": "Test each feature of the app thoroughly to confirm that they work correctly and meet the specifications outlined in the project requirements.",
+            "details": "Review .gitignore, local.properties.example, BuildConfig usage; confirm no anon key in strings committed to repo.",
             "status": "pending",
-            "testStrategy": "Perform manual testing and automated tests to validate feature functionality.",
+            "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 2,
-            "title": "Prepare App Store Listings",
-            "description": "Create and finalize app store listings for both iOS and Android platforms.",
-            "dependencies": [
-              1
-            ],
-            "details": "Gather all necessary information including app descriptions, screenshots, and promotional videos. Ensure compliance with app store guidelines.",
+            "title": "Session and token storage review",
+            "description": "Decide if session persistence meets your risk bar.",
+            "dependencies": [],
+            "details": "Document current SessionManager approach; plan upgrade path to EncryptedSharedPreferences or DataStore encrypted if needed.",
             "status": "pending",
-            "testStrategy": "Review listings for accuracy and completeness before submission.",
+            "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 3,
-            "title": "Create Promotional Materials",
-            "description": "Design and produce marketing materials for the app launch.",
-            "dependencies": [
-              1
-            ],
-            "details": "Develop graphics, social media posts, and other promotional content to generate interest in the app prior to launch.",
+            "title": "Release build and R8",
+            "description": "Turn on minification/shrinking for release with keep rules for reflection.",
+            "dependencies": [],
+            "details": "Enable isMinifyEnabled (and shrinkResources if appropriate), add ProGuard keep rules for JSON/network libraries used; verify release APK runs.",
             "status": "pending",
-            "testStrategy": "Gather feedback on promotional materials from team members and revise as necessary.",
+            "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 4,
-            "title": "Finalize Launch Strategy",
-            "description": "Develop a comprehensive strategy for the app launch including timelines and channels.",
-            "dependencies": [
-              2,
-              3
-            ],
-            "details": "Outline the launch timeline, identify key marketing channels, and assign responsibilities to team members for execution.",
+            "title": "Transport and network policy",
+            "description": "HTTPS only; network security config.",
+            "dependencies": [],
+            "details": "Add network_security_config.xml disallowing cleartext; confirm all auth/API calls use https.",
             "status": "pending",
-            "testStrategy": "Review the launch strategy with stakeholders to ensure alignment and readiness.",
+            "testStrategy": null,
             "parentId": "undefined"
           },
           {
             "id": 5,
-            "title": "Conduct Final Review Meeting",
-            "description": "Hold a meeting with the team to review all preparations for the app launch.",
+            "title": "Supabase RLS and API surface",
+            "description": "Database policies match what the mobile anon key may invoke.",
+            "dependencies": [],
+            "details": "When task data exists in Supabase, define RLS policies per user; test with anon JWT claims. Keep service role key server-side only (future backend).",
+            "status": "pending",
+            "testStrategy": null,
+            "parentId": "undefined"
+          }
+        ]
+      },
+      {
+        "id": "13",
+        "title": "Branding and aesthetics",
+        "description": "Cohesive visual identity across launcher, theme, and key screens.",
+        "details": "Define a small design system: primary/secondary colors, typography, shapes, and spacing consistent with Material 3. Add adaptive launcher icon and themed splash (SplashScreen API). Polish auth and home layouts (elevation, margins, empty states). Optional: illustration or wordmark for empty home.",
+        "testStrategy": "Visual review on light/dark (if supported) and one small phone + one large; verify icon and splash on cold start.",
+        "priority": "medium",
+        "dependencies": [
+          "1"
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Theme: colors and typography",
+            "description": "Centralize brand colors and type scale in themes.xml / Material theme.",
+            "dependencies": [],
+            "details": "Override colorPrimary, colorSecondary, surfaces; choose font family or stick to M3 defaults with tuned colors.",
+            "status": "pending",
+            "testStrategy": null,
+            "parentId": "undefined"
+          },
+          {
+            "id": 2,
+            "title": "Adaptive launcher icon",
+            "description": "Replace default mipmap with branded foreground + optional background.",
+            "dependencies": [],
+            "details": "Use Android Studio Image Asset wizard; support API 26+ adaptive layers.",
+            "status": "pending",
+            "testStrategy": null,
+            "parentId": "undefined"
+          },
+          {
+            "id": 3,
+            "title": "Splash screen",
+            "description": "Themed splash on cold start via SplashScreen API.",
             "dependencies": [
+              1,
+              2
+            ],
+            "details": "Install androidx.core:core-splashscreen; set windowSplashScreenAnimatedIcon and background; keep duration short.",
+            "status": "pending",
+            "testStrategy": null,
+            "parentId": "undefined"
+          },
+          {
+            "id": 4,
+            "title": "Polish auth screens",
+            "description": "Align signup/login with theme and spacing hierarchy.",
+            "dependencies": [
+              1
+            ],
+            "details": "Refine padding, button styles, and status message placement for a finished look.",
+            "status": "pending",
+            "testStrategy": null,
+            "parentId": "undefined"
+          },
+          {
+            "id": 5,
+            "title": "In-app screens consistency",
+            "description": "Home and future feature UIs use the same app bar, cards, and spacing.",
+            "dependencies": [
+              1,
               4
             ],
-            "details": "Discuss the status of all subtasks, address any last-minute issues, and confirm that everyone is prepared for the launch.",
+            "details": "Extract shared styles or composables as the app grows; document spacing tokens (8dp grid).",
             "status": "pending",
-            "testStrategy": "Document meeting outcomes and action items to ensure accountability.",
+            "testStrategy": null,
             "parentId": "undefined"
           }
         ]
@@ -889,8 +952,8 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2026-04-02T02:15:08.108Z",
-      "taskCount": 12,
+      "lastModified": "2026-04-03T01:30:00.000Z",
+      "taskCount": 13,
       "completedCount": 1,
       "tags": [
         "master"

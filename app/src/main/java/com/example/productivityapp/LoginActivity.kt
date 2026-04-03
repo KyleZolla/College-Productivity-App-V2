@@ -19,6 +19,11 @@ import java.util.concurrent.Executors
 class LoginActivity : AppCompatActivity() {
     private val networkExecutor = Executors.newSingleThreadExecutor()
 
+    companion object {
+        const val EXTRA_SIGNUP_SUCCESS_PENDING_CONFIRM = "signup_success_pending_confirm"
+        const val EXTRA_SIGNUP_EMAIL = "signup_email"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (SessionManager.isLoggedIn(this)) {
@@ -55,13 +60,16 @@ class LoginActivity : AppCompatActivity() {
             launchGoogleOAuth(statusText)
         }
 
+        applySignupSuccessFromIntent(intent, emailInput, statusText)
         applyOAuthStatusFromIntent(intent, statusText)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val emailInput = findViewById<EditText>(R.id.loginEmailInput)
         val statusText = findViewById<TextView>(R.id.loginStatusText)
+        applySignupSuccessFromIntent(intent, emailInput, statusText)
         applyOAuthStatusFromIntent(intent, statusText)
     }
 
@@ -80,16 +88,16 @@ class LoginActivity : AppCompatActivity() {
         val password = passwordInput.text.toString()
 
         if (email.isBlank() || password.isBlank()) {
-            statusText.text = getString(R.string.status_login_enter_credentials)
+            statusText.showAuthMessage(getString(R.string.status_login_enter_credentials), AuthMessageTone.ERROR)
             return
         }
 
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
-            statusText.text = getString(R.string.status_missing_config)
+            statusText.showAuthMessage(getString(R.string.status_missing_config), AuthMessageTone.ERROR)
             return
         }
 
-        statusText.text = getString(R.string.status_login_working)
+        statusText.showAuthMessage(getString(R.string.status_login_working), AuthMessageTone.INSTRUCTION)
         logInButton.isEnabled = false
 
         networkExecutor.execute {
@@ -128,20 +136,21 @@ class LoginActivity : AppCompatActivity() {
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
                         }
                         val successMessage = getString(R.string.status_login_success)
-                        statusText.text = successMessage
+                        statusText.showAuthMessage(successMessage, AuthMessageTone.SUCCESS)
                         Toast.makeText(this, successMessage, Toast.LENGTH_LONG).show()
                         val intent = Intent(this, HomeActivity::class.java)
                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                         startActivity(intent)
                         finish()
                     } else {
-                        statusText.text = cleanLoginError(parseErrorMessage(responseBody))
+                        val err = cleanLoginError(parseErrorMessage(responseBody))
+                        statusText.showAuthMessage(err, loginMessageTone(err))
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     logInButton.isEnabled = true
-                    statusText.text = getString(R.string.status_network_error)
+                    statusText.showAuthMessage(getString(R.string.status_network_error), AuthMessageTone.ERROR)
                 }
             }
         }
@@ -159,26 +168,49 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    private fun loginMessageTone(message: String): AuthMessageTone {
+        return when (message) {
+            getString(R.string.status_rate_limited),
+            getString(R.string.status_login_email_not_confirmed) -> AuthMessageTone.INSTRUCTION
+            else -> AuthMessageTone.ERROR
+        }
+    }
+
     private fun launchGoogleOAuth(statusText: TextView) {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
-            statusText.text = getString(R.string.status_missing_config)
+            statusText.showAuthMessage(getString(R.string.status_missing_config), AuthMessageTone.ERROR)
             return
         }
 
         val redirectTo = Uri.encode(getString(R.string.oauth_redirect_url))
         val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/authorize?provider=google&redirect_to=$redirectTo&flow_type=implicit"
-        statusText.text = getString(R.string.status_google_opening)
+        statusText.showAuthMessage(getString(R.string.status_google_opening), AuthMessageTone.INSTRUCTION)
 
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
         } catch (_: Exception) {
-            statusText.text = getString(R.string.status_google_failed)
+            statusText.showAuthMessage(getString(R.string.status_google_failed), AuthMessageTone.ERROR)
         }
+    }
+
+    private fun applySignupSuccessFromIntent(intent: Intent, emailInput: EditText, statusText: TextView) {
+        if (!intent.getBooleanExtra(EXTRA_SIGNUP_SUCCESS_PENDING_CONFIRM, false)) return
+        intent.getStringExtra(EXTRA_SIGNUP_EMAIL)?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            emailInput.setText(it)
+        }
+        statusText.showAuthMessage(getString(R.string.status_after_signup_confirm), AuthMessageTone.INSTRUCTION)
+        intent.removeExtra(EXTRA_SIGNUP_SUCCESS_PENDING_CONFIRM)
+        intent.removeExtra(EXTRA_SIGNUP_EMAIL)
     }
 
     private fun applyOAuthStatusFromIntent(intent: Intent, statusText: TextView) {
         val message = intent.getStringExtra("oauth_result_message") ?: return
-        statusText.text = message
+        val tone = when (message) {
+            getString(R.string.status_google_success) -> AuthMessageTone.SUCCESS
+            getString(R.string.status_google_cancelled) -> AuthMessageTone.ERROR
+            else -> AuthMessageTone.INSTRUCTION
+        }
+        statusText.showAuthMessage(message, tone)
         intent.removeExtra("oauth_result_message")
     }
 

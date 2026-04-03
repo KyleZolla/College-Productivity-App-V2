@@ -6,6 +6,9 @@
     <string name="last_name_hint">Last name</string>
     <string name="email_hint">Email</string>
     <string name="password_hint">Password</string>
+    <string name="confirm_password_hint">Confirm password</string>
+    <string name="status_passwords_match">Passwords match.</string>
+    <string name="status_passwords_mismatch">Passwords do not match.</string>
     <string name="sign_up_button">Sign up</string>
     <string name="log_in_button">Log in</string>
     <string name="continue_with_google">Continue with Google</string>
@@ -13,8 +16,10 @@
     <string name="need_account">Need an account?</string>
     <string name="oauth_redirect_url">productivityapp://auth/callback</string>
     <string name="status_working">Creating account...</string>
-    <string name="status_signup_check_email">Check your email for a confirmation link.</string>
+    <string name="status_signup_check_email">Check your email for a confirmation link.\n\nAfter you confirm in the browser, use Log in below with the same email and password. The app cannot detect the email link by itself.</string>
+    <string name="status_after_signup_confirm">Check your email to confirm, then log in here.</string>
     <string name="status_signup_existing_account">An account already exists with that email.</string>
+    <string name="status_signup_email_not_deliverable">We couldn\'t send a confirmation email to this address. Check that it\'s correct and still in use, or try a different email.</string>
     <string name="status_signup_no_confirmation">Sign-up could not be confirmed. Please try again.</string>
     <string name="status_login_working">Logging in...</string>
     <string name="status_login_success">Login succeeded.</string>

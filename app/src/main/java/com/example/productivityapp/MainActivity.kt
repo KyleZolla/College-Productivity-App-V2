@@ -6,11 +6,11 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.doAfterTextChanged
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,6 +18,10 @@ import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
     private val networkExecutor = Executors.newSingleThreadExecutor()
+    private lateinit var passwordInput: EditText
+    private lateinit var confirmPasswordInput: EditText
+    private lateinit var statusText: TextView
+    private var signUpRequestInFlight = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,16 +40,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         val emailInput = findViewById<EditText>(R.id.emailInput)
-        val passwordInput = findViewById<EditText>(R.id.passwordInput)
+        passwordInput = findViewById(R.id.passwordInput)
+        confirmPasswordInput = findViewById(R.id.confirmPasswordInput)
         val firstNameInput = findViewById<EditText>(R.id.firstNameInput)
         val lastNameInput = findViewById<EditText>(R.id.lastNameInput)
         val signUpButton = findViewById<Button>(R.id.signUpButton)
         val googleSignInButton = findViewById<Button>(R.id.googleSignInButton)
         val goToLoginButton = findViewById<Button>(R.id.goToLoginButton)
-        val statusText = findViewById<TextView>(R.id.statusText)
+        statusText = findViewById(R.id.statusText)
+
+        passwordInput.doAfterTextChanged { refreshPasswordMatchUi() }
+        confirmPasswordInput.doAfterTextChanged { refreshPasswordMatchUi() }
 
         signUpButton.setOnClickListener {
-            createAccount(firstNameInput, lastNameInput, emailInput, passwordInput, signUpButton, statusText)
+            createAccount(
+                firstNameInput,
+                lastNameInput,
+                emailInput,
+                passwordInput,
+                confirmPasswordInput,
+                signUpButton,
+                statusText
+            )
         }
 
         goToLoginButton.setOnClickListener {
@@ -66,11 +82,25 @@ class MainActivity : AppCompatActivity() {
         return AuthUtils.isValidEmailAndPassword(email, password)
     }
 
+    private fun refreshPasswordMatchUi() {
+        if (signUpRequestInFlight) return
+        val password = passwordInput.text.toString()
+        val confirm = confirmPasswordInput.text.toString()
+        when {
+            confirm.isEmpty() -> statusText.clearAuthMessage()
+            password != confirm ->
+                statusText.showAuthMessage(getString(R.string.status_passwords_mismatch), AuthMessageTone.ERROR)
+            else ->
+                statusText.showAuthMessage(getString(R.string.status_passwords_match), AuthMessageTone.SUCCESS)
+        }
+    }
+
     private fun createAccount(
         firstNameInput: EditText,
         lastNameInput: EditText,
         emailInput: EditText,
         passwordInput: EditText,
+        confirmPasswordInput: EditText,
         signUpButton: Button,
         statusText: TextView
     ) {
@@ -78,23 +108,30 @@ class MainActivity : AppCompatActivity() {
         val lastName = lastNameInput.text.toString().trim()
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
+        val confirmPassword = confirmPasswordInput.text.toString()
 
         if (firstName.isBlank() || lastName.isBlank()) {
-            statusText.text = getString(R.string.status_name_required)
+            statusText.showAuthMessage(getString(R.string.status_name_required), AuthMessageTone.ERROR)
             return
         }
 
         if (!isValidInput(email, password)) {
-            statusText.text = getString(R.string.status_invalid_input)
+            statusText.showAuthMessage(getString(R.string.status_invalid_input), AuthMessageTone.ERROR)
+            return
+        }
+
+        if (password != confirmPassword) {
+            statusText.showAuthMessage(getString(R.string.status_passwords_mismatch), AuthMessageTone.ERROR)
             return
         }
 
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
-            statusText.text = getString(R.string.status_missing_config)
+            statusText.showAuthMessage(getString(R.string.status_missing_config), AuthMessageTone.ERROR)
             return
         }
 
-        statusText.text = getString(R.string.status_working)
+        signUpRequestInFlight = true
+        statusText.showAuthMessage(getString(R.string.status_working), AuthMessageTone.INSTRUCTION)
         signUpButton.isEnabled = false
         performSignUpRequest(firstName, lastName, email, password, signUpButton, statusText)
     }
@@ -140,19 +177,23 @@ class MainActivity : AppCompatActivity() {
                     .orEmpty()
 
                 runOnUiThread {
+                    signUpRequestInFlight = false
                     signUpButton.isEnabled = true
                     if (responseCode in 200..299) {
-                        val payload = JSONObject(responseBody)
-                        val responseError = parseErrorMessage(responseBody)
-                        if (responseError != "Unknown error") {
-                            statusText.text = cleanSignUpError(responseError)
+                        val root = JSONObject(responseBody)
+                        val envelope = root.optJSONObject("data") ?: root
+
+                        val user = resolveSignupUserObject(envelope)
+                        val identities = user?.optJSONArray("identities")
+                        if (user != null && identities != null && identities.length() == 0) {
+                            statusText.showAuthMessage(
+                                getString(R.string.status_signup_existing_account),
+                                AuthMessageTone.ERROR
+                            )
                             return@runOnUiThread
                         }
 
-                        val accessToken = payload.optString("access_token")
-                        val refreshToken = payload.optString("refresh_token")
-                        val expiresIn = if (payload.has("expires_in")) payload.optLong("expires_in") else null
-
+                        val (accessToken, refreshToken, expiresIn) = extractSessionFromSignupEnvelope(envelope)
                         if (accessToken.isNotBlank()) {
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
                             val intent = Intent(this, HomeActivity::class.java)
@@ -162,63 +203,154 @@ class MainActivity : AppCompatActivity() {
                             return@runOnUiThread
                         }
 
-                        val message = getString(R.string.status_signup_check_email)
-                        statusText.text = message
-                        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                        if (hasExplicitSignupError(root) || hasExplicitSignupError(envelope)) {
+                            val err = cleanSignUpError(combinedAuthErrorText(responseBody), responseCode)
+                            statusText.showAuthMessage(err, signUpMessageTone(err))
+                            return@runOnUiThread
+                        }
+
+                        val loginIntent = Intent(this, LoginActivity::class.java).apply {
+                            putExtra(LoginActivity.EXTRA_SIGNUP_SUCCESS_PENDING_CONFIRM, true)
+                            putExtra(LoginActivity.EXTRA_SIGNUP_EMAIL, email)
+                        }
+                        startActivity(loginIntent)
+                        finish()
                     } else {
-                        statusText.text = cleanSignUpError(parseErrorMessage(responseBody))
+                        val err = cleanSignUpError(combinedAuthErrorText(responseBody), responseCode)
+                        statusText.showAuthMessage(err, signUpMessageTone(err))
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
+                    signUpRequestInFlight = false
                     signUpButton.isEnabled = true
-                    statusText.text = getString(R.string.status_network_error)
+                    statusText.showAuthMessage(getString(R.string.status_network_error), AuthMessageTone.ERROR)
                 }
             }
         }
     }
 
-    private fun parseErrorMessage(responseBody: String): String {
+    /**
+     * GoTrue may return `{ "data": { "user", "session" } }` (Supabase JS shape) or a flat `{ "user", "session" }`.
+     * Duplicate email with confirmations enabled often yields `data.user.identities == []`.
+     */
+    private fun resolveSignupUserObject(envelope: JSONObject): JSONObject? {
+        envelope.optJSONObject("user")?.let { return it }
+        if (envelope.has("identities") && envelope.has("email")) {
+            return envelope
+        }
+        return null
+    }
+
+    private fun extractSessionFromSignupEnvelope(envelope: JSONObject): Triple<String, String, Long?> {
+        val session = envelope.optJSONObject("session")
+        if (session != null && !session.optString("access_token").isNullOrBlank()) {
+            val exp = if (session.has("expires_in") && !session.isNull("expires_in")) {
+                session.optLong("expires_in")
+            } else {
+                null
+            }
+            return Triple(
+                session.optString("access_token"),
+                session.optString("refresh_token"),
+                exp
+            )
+        }
+        val expRoot = if (envelope.has("expires_in") && !envelope.isNull("expires_in")) {
+            envelope.optLong("expires_in")
+        } else {
+            null
+        }
+        return Triple(
+            envelope.optString("access_token"),
+            envelope.optString("refresh_token"),
+            expRoot
+        )
+    }
+
+    private fun hasExplicitSignupError(payload: JSONObject): Boolean {
+        return payload.optString("msg").isNotBlank() ||
+            payload.optString("error_description").isNotBlank() ||
+            payload.optString("error").isNotBlank() ||
+            payload.optString("error_code").isNotBlank()
+    }
+
+    private fun combinedAuthErrorText(responseBody: String): String {
         return try {
             val obj = JSONObject(responseBody)
-            obj.optString("msg")
-                .ifBlank { obj.optString("error_description") }
-                .ifBlank { obj.optString("error") }
-                .ifBlank { "Unknown error" }
+            listOf(
+                obj.optString("msg"),
+                obj.optString("message"),
+                obj.optString("error_description"),
+                obj.optString("error"),
+                obj.optString("hint"),
+                obj.optString("error_code"),
+                obj.optString("code")
+            ).joinToString(" ")
+                .trim()
+                .ifBlank { "" }
         } catch (_: Exception) {
-            if (responseBody.isBlank()) "Unknown error" else responseBody
+            responseBody.trim()
         }
     }
 
-    private fun cleanSignUpError(raw: String): String {
+    private fun cleanSignUpError(raw: String, httpStatus: Int = 0): String {
         val msg = raw.lowercase()
         return when {
-            msg.contains("already registered") || msg.contains("already been registered") -> {
+            msg.contains("already registered") ||
+                msg.contains("already been registered") ||
+                msg.contains("user already registered") ||
+                msg.contains("email already") ||
+                msg.contains("already exists") ||
+                msg.contains("duplicate") ||
+                msg.contains("user_already_exists") ||
+                msg.contains("email_exists") -> {
                 getString(R.string.status_signup_existing_account)
+            }
+            isConfirmationEmailSendFailure(msg, httpStatus) -> {
+                getString(R.string.status_signup_email_not_deliverable)
             }
             msg.contains("rate limit") || msg.contains("too many requests") -> {
                 getString(R.string.status_rate_limited)
             }
             msg.contains("network") || msg.contains("timeout") -> getString(R.string.status_network_error)
-            msg == "unknown error" -> getString(R.string.status_generic_error)
+            msg.isBlank() || msg == "unknown error" -> getString(R.string.status_generic_error)
             else -> raw
+        }
+    }
+
+    private fun isConfirmationEmailSendFailure(msg: String, httpStatus: Int): Boolean {
+        if (msg.contains("confirmation email") || msg.contains("error sending confirmation")) return true
+        if (msg.contains("send confirmation") || msg.contains("sending confirmation")) return true
+        if (msg.contains("smtp") && (msg.contains("error") || msg.contains("fail"))) return true
+        if (msg.contains("mailer") || msg.contains("email delivery") || msg.contains("mail delivery")) return true
+        if (httpStatus == 500 && msg.contains("email")) return true
+        if (msg.contains("unexpected failure") && (msg.contains("email") || msg.contains("confirmation"))) return true
+        return false
+    }
+
+    private fun signUpMessageTone(message: String): AuthMessageTone {
+        return if (message == getString(R.string.status_rate_limited)) {
+            AuthMessageTone.INSTRUCTION
+        } else {
+            AuthMessageTone.ERROR
         }
     }
 
     private fun launchGoogleOAuth(statusText: TextView) {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
-            statusText.text = getString(R.string.status_missing_config)
+            statusText.showAuthMessage(getString(R.string.status_missing_config), AuthMessageTone.ERROR)
             return
         }
 
         val redirectTo = Uri.encode(getString(R.string.oauth_redirect_url))
         val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/authorize?provider=google&redirect_to=$redirectTo&flow_type=implicit"
-        statusText.text = getString(R.string.status_google_opening)
+        statusText.showAuthMessage(getString(R.string.status_google_opening), AuthMessageTone.INSTRUCTION)
 
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)))
         } catch (_: Exception) {
-            statusText.text = getString(R.string.status_google_failed)
+            statusText.showAuthMessage(getString(R.string.status_google_failed), AuthMessageTone.ERROR)
         }
     }
 }

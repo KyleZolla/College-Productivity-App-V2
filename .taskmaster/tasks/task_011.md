@@ -1,76 +1,76 @@
 # Task ID: 11
 
-**Title:** Conduct User Testing and Feedback Collection
+**Title:** Password recovery (forgot password)
 
 **Status:** pending
 
-**Dependencies:** 5, 8, 10
+**Dependencies:** 2
 
 **Priority:** medium
 
-**Description:** Gather user feedback on the app's functionality and usability.
+**Description:** Let users request a reset email and set a new password from a return link into the app.
 
 **Details:**
 
-Conduct user testing sessions to gather feedback on the app's features and usability. Use this feedback to make necessary adjustments.
+Use Supabase Auth POST /auth/v1/recover with redirect_to pointing at an app deep link (e.g. productivityapp://auth/reset). Handle the callback (fragment tokens, type=recovery), then call the user update/password API with the recovery session. Optionally host a minimal static HTTPS page that redirects custom-scheme + hash for email clients that block app links. Document Supabase redirect allowlist and email template.
 
 **Test Strategy:**
 
-Analyze user feedback and implement changes based on common pain points and suggestions.
+Request reset, open link (or simulated intent), confirm new password works for login; verify invalid/expired tokens show a clear error.
 
 ## Subtasks
 
-### 11.1. Define User Testing Objectives
+### 11.1. Configure Supabase recovery redirect
 
 **Status:** pending  
 **Dependencies:** None  
 
-Establish clear objectives for what the user testing sessions aim to achieve.
+Allowlist redirect URL(s) and confirm email recovery template points to the chosen URL.
 
 **Details:**
 
-Identify key areas of the app that need feedback, such as usability, functionality, and user experience. Document these objectives to guide the testing sessions.
+In Supabase Auth settings, add the app deep link and any optional HTTPS bridge URL to Redirect URLs. Note Site URL implications for development vs production.
 
-### 11.2. Recruit Test Participants
+### 11.2. Forgot-password entry on login
 
 **Status:** pending  
-**Dependencies:** None  
+**Dependencies:** 11.1  
 
-Find and recruit users who will participate in the testing sessions.
+UI to collect email and call recover endpoint.
 
 **Details:**
 
-Create a list of criteria for selecting participants, such as demographics and familiarity with similar apps. Use social media and user forums to recruit a diverse group of testers.
+Add Forgot password? on LoginActivity (or dialog). POST recover with apikey/Authorization headers matching existing auth REST usage; show success/error messaging without revealing whether the email exists if desired.
 
-### 11.3. Conduct User Testing Sessions
+### 11.3. Deep link handler for reset session
 
 **Status:** pending  
-**Dependencies:** 11.1, 11.2  
+**Dependencies:** 11.1  
 
-Facilitate sessions where users interact with the app and provide feedback.
+Activity/intent-filter to receive reset link and parse tokens.
 
 **Details:**
 
-Schedule and conduct testing sessions, ensuring participants are comfortable and understand the tasks they need to complete. Record sessions for later analysis.
+Reuse or extend AuthUtils/AuthCallbackActivity pattern: parse URL fragment for access_token, refresh_token, type; distinguish recovery from OAuth; save session or pass tokens to reset screen.
 
-### 11.4. Analyze User Feedback
+### 11.4. In-app set new password screen
 
 **Status:** pending  
 **Dependencies:** 11.3  
 
-Review and analyze the feedback collected from user testing sessions.
+New password + confirm, submit with recovery session.
 
 **Details:**
 
-Compile feedback into a report, categorizing comments by theme and identifying common pain points. Use this analysis to inform necessary adjustments to the app.
+Call Supabase user update (password) with Bearer access token from recovery flow; then clear recovery UX and route to login or home per product choice.
 
-### 11.5. Implement Changes Based on Feedback
+### 11.5. Optional static redirect page
 
 **Status:** pending  
-**Dependencies:** 11.4  
+**Dependencies:** 11.1  
 
-Make necessary adjustments to the app based on user feedback.
+Host a one-file HTML redirect for stubborn email clients.
 
 **Details:**
 
-Prioritize changes based on user feedback and implement them in the app. Ensure that adjustments improve usability and functionality as intended.
+If needed, deploy minimal page on GitHub Pages or similar that forwards location.hash to the app custom scheme; add that HTTPS URL to Supabase allowlist.

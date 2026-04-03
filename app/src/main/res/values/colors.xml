@@ -2,4 +2,8 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <!-- Fallbacks if theme attrs cannot be resolved -->
+    <color name="auth_message_error_fallback">#B3261E</color>
+    <color name="auth_message_success">#1B5E20</color>
+    <color name="auth_message_neutral_fallback">#49454F</color>
 </resources>
