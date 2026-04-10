@@ -39,6 +39,9 @@
     <string name="status_name_required">Enter your first and last name.</string>
     <string name="status_empty"></string>
     <string name="home_title">Home</string>
-    <string name="home_logged_in">You are logged in.</string>
     <string name="log_out_button">Log out</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_tasks">Tasks</string>
+    <string name="nav_profile">Profile</string>
+    <string name="add_task">Add task</string>
 </resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- End inset so bottom actions stay left of the FAB (16 margin + 56 FAB + 16 gap). -->
+    <dimen name="fab_clearance_end">88dp</dimen>
+</resources>
