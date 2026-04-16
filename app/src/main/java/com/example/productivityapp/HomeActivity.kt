@@ -7,7 +7,6 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -81,7 +80,7 @@ class HomeActivity : AppCompatActivity() {
         navProfile.setOnClickListener { showTab(Tab.Profile) }
 
         findViewById<FloatingActionButton>(R.id.fabAddTask).setOnClickListener {
-            Toast.makeText(this, R.string.add_task, Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, AddTaskActivity::class.java))
         }
 
         showTab(Tab.Home)

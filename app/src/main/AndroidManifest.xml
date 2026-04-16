@@ -31,6 +31,9 @@
             android:name=".HomeActivity"
             android:exported="false" />
         <activity
+            android:name=".AddTaskActivity"
+            android:exported="false" />
+        <activity
             android:name=".LoginActivity"
             android:exported="false" />
         <activity
