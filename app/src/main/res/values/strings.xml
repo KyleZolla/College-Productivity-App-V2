@@ -45,4 +45,8 @@
     <string name="nav_profile">Profile</string>
     <string name="add_task">Add task</string>
     <string name="cancel">Cancel</string>
+    <string name="task_title_hint">Task title</string>
+    <string name="due_date">Due date</string>
+    <string name="due_date_not_set">Not set</string>
+    <string name="create_task">Create task</string>
 </resources>

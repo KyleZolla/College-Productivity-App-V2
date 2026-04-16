@@ -31,6 +31,8 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var navTasksLabel: TextView
     private lateinit var navProfileLabel: TextView
 
+    private var selectedTab: Tab = Tab.Home
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -83,10 +85,26 @@ class HomeActivity : AppCompatActivity() {
             startActivity(Intent(this, AddTaskActivity::class.java))
         }
 
-        showTab(Tab.Home)
+        applyRequestedTab(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        applyRequestedTab(intent)
+    }
+
+    private fun applyRequestedTab(intent: Intent?) {
+        val requested = intent?.getStringExtra(EXTRA_SELECTED_TAB)
+        val tab = when (requested) {
+            TAB_TASKS -> Tab.Tasks
+            TAB_PROFILE -> Tab.Profile
+            else -> Tab.Home
+        }
+        showTab(tab)
     }
 
     private fun showTab(tab: Tab) {
+        selectedTab = tab
         panelHome.visibility = if (tab == Tab.Home) View.VISIBLE else View.GONE
         panelTasks.visibility = if (tab == Tab.Tasks) View.VISIBLE else View.GONE
         panelProfile.visibility = if (tab == Tab.Profile) View.VISIBLE else View.GONE
@@ -103,5 +121,12 @@ class HomeActivity : AppCompatActivity() {
         style(navHomeIcon, navHomeLabel, tab == Tab.Home)
         style(navTasksIcon, navTasksLabel, tab == Tab.Tasks)
         style(navProfileIcon, navProfileLabel, tab == Tab.Profile)
+    }
+
+    companion object {
+        const val EXTRA_SELECTED_TAB = "selected_tab"
+        const val TAB_HOME = "home"
+        const val TAB_TASKS = "tasks"
+        const val TAB_PROFILE = "profile"
     }
 }
