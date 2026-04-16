@@ -204,7 +204,7 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         if (hasExplicitSignupError(root) || hasExplicitSignupError(envelope)) {
-                            val err = cleanSignUpError(combinedAuthErrorText(responseBody), responseCode)
+                            val err = signupErrorDisplay(responseBody, responseCode)
                             statusText.showAuthMessage(err, signUpMessageTone(err))
                             return@runOnUiThread
                         }
@@ -216,7 +216,7 @@ class MainActivity : AppCompatActivity() {
                         startActivity(loginIntent)
                         finish()
                     } else {
-                        val err = cleanSignUpError(combinedAuthErrorText(responseBody), responseCode)
+                        val err = signupErrorDisplay(responseBody, responseCode)
                         statusText.showAuthMessage(err, signUpMessageTone(err))
                     }
                 }
@@ -278,19 +278,50 @@ class MainActivity : AppCompatActivity() {
     private fun combinedAuthErrorText(responseBody: String): String {
         return try {
             val obj = JSONObject(responseBody)
+            val nestedError = obj.optJSONObject("error")
+            val nestedBits = if (nestedError != null) {
+                listOf(
+                    nestedError.optString("message"),
+                    nestedError.optString("msg"),
+                    nestedError.optString("error_description"),
+                ).filter { it.isNotBlank() }.joinToString(" ")
+            } else {
+                ""
+            }
             listOf(
                 obj.optString("msg"),
                 obj.optString("message"),
                 obj.optString("error_description"),
                 obj.optString("error"),
                 obj.optString("hint"),
+                obj.optString("details"),
                 obj.optString("error_code"),
-                obj.optString("code")
+                obj.optString("code"),
+                nestedBits,
             ).joinToString(" ")
                 .trim()
                 .ifBlank { "" }
         } catch (_: Exception) {
             responseBody.trim()
+        }
+    }
+
+    /** Friendly copy plus raw Supabase text so deliverability / SMTP issues are visible. */
+    private fun signupErrorDisplay(responseBody: String, responseCode: Int): String {
+        val technical = combinedAuthErrorText(responseBody).trim()
+            .ifBlank { responseBody.trim().take(800) }
+        val friendly = cleanSignUpError(technical, responseCode)
+        val httpPart = if (responseCode in 400..599) "\n(HTTP $responseCode)" else ""
+        val techLower = technical.lowercase()
+        val friendlyLower = friendly.lowercase()
+        val redundant = technical.isBlank() ||
+            friendly == technical ||
+            friendlyLower.contains(techLower) ||
+            techLower.contains(friendlyLower)
+        return if (redundant) {
+            friendly + httpPart
+        } else {
+            "$friendly$httpPart\n\n$technical"
         }
     }
 
@@ -330,7 +361,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun signUpMessageTone(message: String): AuthMessageTone {
-        return if (message == getString(R.string.status_rate_limited)) {
+        val firstLine = message.lineSequence().firstOrNull().orEmpty().trim()
+        return if (firstLine == getString(R.string.status_rate_limited)) {
             AuthMessageTone.INSTRUCTION
         } else {
             AuthMessageTone.ERROR

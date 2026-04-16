@@ -7,6 +7,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -14,8 +15,12 @@ import androidx.core.view.WindowInsetsCompat
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Calendar
+import java.util.concurrent.Executors
 
 class AddTaskActivity : AppCompatActivity() {
+
+    private val networkExecutor = Executors.newSingleThreadExecutor()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -31,6 +36,8 @@ class AddTaskActivity : AppCompatActivity() {
         val titleInput = findViewById<EditText>(R.id.taskTitleInput)
         val dueDateRow = findViewById<LinearLayout>(R.id.dueDateRow)
         val dueDateValue = findViewById<TextView>(R.id.dueDateValue)
+        val createButton = findViewById<Button>(R.id.createTaskButton)
+        val cancelButton = findViewById<Button>(R.id.cancelAddTaskButton)
 
         var selectedDueDate: LocalDate? = null
         val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
@@ -48,20 +55,77 @@ class AddTaskActivity : AppCompatActivity() {
             }, initialYear, initialMonth, initialDay).show()
         }
 
-        findViewById<Button>(R.id.createTaskButton).setOnClickListener {
-            // TODO: create the task. For now just go to Tasks tab.
-            startActivity(
-                Intent(this, HomeActivity::class.java).apply {
-                    putExtra(HomeActivity.EXTRA_SELECTED_TAB, HomeActivity.TAB_TASKS)
-                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        createButton.setOnClickListener {
+            val title = titleInput.text.toString().trim()
+            val due = selectedDueDate
+            if (title.isBlank()) {
+                Toast.makeText(this, R.string.error_task_title_required, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (due == null) {
+                Toast.makeText(this, R.string.error_task_due_required, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val accessToken = SessionManager.getAccessToken(this)
+            if (accessToken.isNullOrBlank()) {
+                Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val userId = SupabaseUserId.resolveUserId(accessToken)
+            if (userId.isNullOrBlank()) {
+                Toast.makeText(this, R.string.error_task_user_unknown, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            createButton.isEnabled = false
+            cancelButton.isEnabled = false
+
+            networkExecutor.execute {
+                val result = SupabaseTasksApi.insertTask(accessToken, userId, title, due)
+                runOnUiThread {
+                    createButton.isEnabled = true
+                    cancelButton.isEnabled = true
+                    when (result) {
+                        is SupabaseTasksApi.InsertResult.Success -> {
+                            val dueDisplay = due.format(dateFormatter)
+                            startActivity(
+                                Intent(this, HomeActivity::class.java).apply {
+                                    addFlags(
+                                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                    )
+                                    putExtra(HomeActivity.EXTRA_SELECTED_TAB, HomeActivity.TAB_TASKS)
+                                }
+                            )
+                            startActivity(
+                                Intent(this, TaskDetailActivity::class.java).apply {
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_ID, result.id)
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, title)
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
+                                }
+                            )
+                            finish()
+                        }
+                        is SupabaseTasksApi.InsertResult.Failure -> {
+                            Toast.makeText(
+                                this,
+                                getString(R.string.error_task_create_failed) + "\n" + result.message,
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                 }
-            )
-            finish()
+            }
         }
 
-        findViewById<Button>(R.id.cancelAddTaskButton).setOnClickListener {
+        cancelButton.setOnClickListener {
             finish()
         }
     }
-}
 
+    override fun onDestroy() {
+        super.onDestroy()
+        networkExecutor.shutdownNow()
+    }
+}

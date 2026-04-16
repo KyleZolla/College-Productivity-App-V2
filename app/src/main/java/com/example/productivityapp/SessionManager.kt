@@ -38,4 +38,11 @@ object SessionManager {
             .remove(KEY_EXPIRES_AT_MS)
             .apply()
     }
+
+    fun getAccessToken(context: Context): String? {
+        if (!isLoggedIn(context)) return null
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_ACCESS_TOKEN, null)
+            ?.takeIf { it.isNotBlank() }
+    }
 }

@@ -49,4 +49,16 @@
     <string name="due_date">Due date</string>
     <string name="due_date_not_set">Not set</string>
     <string name="create_task">Create task</string>
+    <string name="task_detail_title">Task</string>
+    <string name="task_detail_name_label">Title</string>
+    <string name="status_creating_task">Creating task…</string>
+    <string name="error_task_title_required">Enter a task name.</string>
+    <string name="error_task_due_required">Pick a due date.</string>
+    <string name="error_task_not_signed_in">You need to be signed in.</string>
+    <string name="error_task_user_unknown">Could not read your user id. Try signing in again.</string>
+    <string name="error_task_create_failed">Could not create task.</string>
+    <string name="tasks_screen_heading">Your tasks</string>
+    <string name="tasks_empty">No tasks yet.\nTap + to add one.</string>
+    <string name="task_row_due_line">Due %1$s</string>
+    <string name="error_tasks_load_failed">Could not load tasks.</string>
 </resources>

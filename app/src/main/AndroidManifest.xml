@@ -29,9 +29,13 @@
         </activity>
         <activity
             android:name=".HomeActivity"
-            android:exported="false" />
+            android:exported="false"
+            android:launchMode="singleTop" />
         <activity
             android:name=".AddTaskActivity"
+            android:exported="false" />
+        <activity
+            android:name=".TaskDetailActivity"
             android:exported="false" />
         <activity
             android:name=".LoginActivity"
