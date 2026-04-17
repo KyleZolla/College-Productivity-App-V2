@@ -2,4 +2,7 @@
 <resources>
     <!-- End inset so bottom actions stay left of the FAB (16 margin + 56 FAB + 16 gap). -->
     <dimen name="fab_clearance_end">88dp</dimen>
+    <!-- Bottom padding for scrollable home content above nav + FAB. -->
+    <dimen name="home_scroll_bottom_padding">108dp</dimen>
+    <dimen name="home_urgent_card_stroke_width">2dp</dimen>
 </resources>

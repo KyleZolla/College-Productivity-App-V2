@@ -33,6 +33,10 @@ object SupabaseTasksApi {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return ListResult.Failure("Missing Supabase config.")
         }
+        return listTasksImpl(accessToken)
+    }
+
+    private fun listTasksImpl(accessToken: String): ListResult {
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
             val query = "select=id,title,dueDate&order=dueDate.asc.nullslast"

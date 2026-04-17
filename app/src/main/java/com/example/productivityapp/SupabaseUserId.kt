@@ -1,6 +1,5 @@
 package com.example.productivityapp
 
-import android.util.Base64
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -17,19 +16,7 @@ object SupabaseUserId {
     }
 
     private fun userIdFromJwt(accessToken: String): String? {
-        val parts = accessToken.split('.')
-        if (parts.size < 2) return null
-        val segment = parts[1]
-        val padded = buildString {
-            append(segment)
-            repeat((4 - segment.length % 4) % 4) { append('=') }
-        }
-        return try {
-            val json = JSONObject(String(Base64.decode(padded, Base64.URL_SAFE), Charsets.UTF_8))
-            json.optString("sub").takeIf { it.isNotBlank() }
-        } catch (_: Exception) {
-            null
-        }
+        return JwtPayloadParser.payloadJson(accessToken)?.optString("sub")?.takeIf { it.isNotBlank() }
     }
 
     private fun fetchUserIdFromApi(accessToken: String): String? {

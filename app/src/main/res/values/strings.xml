@@ -39,6 +39,14 @@
     <string name="status_name_required">Enter your first and last name.</string>
     <string name="status_empty"></string>
     <string name="home_title">Home</string>
+    <string name="home_coming_up_label">Coming up</string>
+    <string name="home_greet_morning">Good morning, %1$s 👋</string>
+    <string name="home_greet_afternoon">Good afternoon, %1$s 👋</string>
+    <string name="home_greet_evening">Good evening, %1$s 👋</string>
+    <string name="home_greet_late">Hey, %1$s 👋</string>
+    <string name="home_empty_upcoming">No upcoming tasks. Tap + to add one.</string>
+    <string name="home_view_all_tasks">View all tasks →</string>
+    <string name="home_upcoming_load_failed">Couldn\'t load upcoming tasks.</string>
     <string name="log_out_button">Log out</string>
     <string name="nav_home">Home</string>
     <string name="nav_tasks">Tasks</string>
@@ -61,4 +69,9 @@
     <string name="tasks_empty">No tasks yet.\nTap + to add one.</string>
     <string name="task_row_due_line">Due %1$s</string>
     <string name="error_tasks_load_failed">Could not load tasks.</string>
+    <string name="due_relative_today">Today</string>
+    <string name="due_relative_tomorrow">Tomorrow</string>
+    <string name="due_relative_yesterday">Yesterday</string>
+    <string name="due_relative_next_weekday">Next %1$s</string>
+    <string name="due_relative_none">No date</string>
 </resources>

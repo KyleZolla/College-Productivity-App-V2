@@ -6,4 +6,9 @@
     <color name="auth_message_error_fallback">#B3261E</color>
     <color name="auth_message_success">#1B5E20</color>
     <color name="auth_message_neutral_fallback">#49454F</color>
+    <color name="home_neutral_pill_bg">#E8E8E8</color>
+    <color name="home_urgent_card_fill">#EDE7F6</color>
+    <color name="home_urgent_card_stroke">#6750A4</color>
+    <color name="home_urgent_pill_bg">#6750A4</color>
+    <color name="home_urgent_pill_text">#FFFFFF</color>
 </resources>
