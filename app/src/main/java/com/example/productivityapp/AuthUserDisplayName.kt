@@ -30,4 +30,28 @@ object AuthUserDisplayName {
         }
         return "there"
     }
+
+    /** Full name for profile: metadata names, else a title-cased email local-part. */
+    fun displayNameForProfile(accessToken: String): String {
+        val root = JwtPayloadParser.payloadJson(accessToken) ?: return ""
+        val meta = root.optJSONObject("user_metadata") ?: JSONObject()
+        meta.optString("full_name").trim().ifBlank { null }?.let { return it }
+        val fn = meta.optString("first_name").trim()
+        val ln = meta.optString("last_name").trim()
+        if (fn.isNotEmpty() || ln.isNotEmpty()) return "$fn $ln".trim()
+        meta.optString("name").trim().ifBlank { null }?.let { return it }
+        val given = meta.optString("given_name").trim()
+        val family = meta.optString("family_name").trim()
+        if (given.isNotEmpty() || family.isNotEmpty()) return "$given $family".trim()
+        val email = root.optString("email").trim()
+        if (email.isNotBlank()) {
+            return email.substringBefore('@').substringBefore('+')
+                .replaceFirstChar { it.titlecase(Locale.getDefault()) }
+        }
+        return ""
+    }
+
+    fun emailFromAccessToken(accessToken: String): String {
+        return JwtPayloadParser.payloadJson(accessToken)?.optString("email")?.trim().orEmpty()
+    }
 }

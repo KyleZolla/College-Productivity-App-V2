@@ -5,4 +5,5 @@
     <!-- Bottom padding for scrollable home content above nav + FAB. -->
     <dimen name="home_scroll_bottom_padding">108dp</dimen>
     <dimen name="home_urgent_card_stroke_width">2dp</dimen>
+    <dimen name="profile_logout_stroke_width">1dp</dimen>
 </resources>

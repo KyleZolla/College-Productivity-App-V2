@@ -48,6 +48,7 @@
     <string name="home_view_all_tasks">View all tasks →</string>
     <string name="home_upcoming_load_failed">Couldn\'t load upcoming tasks.</string>
     <string name="log_out_button">Log out</string>
+    <string name="profile_name_fallback">Account</string>
     <string name="nav_home">Home</string>
     <string name="nav_tasks">Tasks</string>
     <string name="nav_profile">Profile</string>

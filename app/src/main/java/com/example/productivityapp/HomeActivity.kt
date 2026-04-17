@@ -4,7 +4,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -17,6 +16,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -56,6 +56,9 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeUpcomingEmpty: TextView
     private lateinit var homeUpcomingCards: LinearLayout
     private lateinit var homeViewAllTasks: TextView
+
+    private lateinit var profileDisplayName: TextView
+    private lateinit var profileEmail: TextView
 
     private val detailDueFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
 
@@ -97,7 +100,10 @@ class HomeActivity : AppCompatActivity() {
         homeViewAllTasks = findViewById(R.id.homeViewAllTasks)
         homeViewAllTasks.setOnClickListener { showTab(Tab.Tasks) }
 
-        findViewById<Button>(R.id.logOutButton).setOnClickListener {
+        profileDisplayName = findViewById(R.id.profileDisplayName)
+        profileEmail = findViewById(R.id.profileEmail)
+
+        findViewById<MaterialButton>(R.id.logOutButton).setOnClickListener {
             SessionManager.clearSession(this)
             startActivity(
                 Intent(this, LoginActivity::class.java).apply {
@@ -137,7 +143,7 @@ class HomeActivity : AppCompatActivity() {
                 refreshHomeHeader()
                 loadHomeUpcoming()
             }
-            else -> {}
+            Tab.Profile -> refreshProfileCard()
         }
     }
 
@@ -174,7 +180,7 @@ class HomeActivity : AppCompatActivity() {
                 refreshHomeHeader()
                 loadHomeUpcoming()
             }
-            else -> {}
+            Tab.Profile -> refreshProfileCard()
         }
 
         val primaryColor = MaterialColors.getColor(navHome, com.google.android.material.R.attr.colorPrimary)
@@ -189,6 +195,18 @@ class HomeActivity : AppCompatActivity() {
         style(navHomeIcon, navHomeLabel, tab == Tab.Home)
         style(navTasksIcon, navTasksLabel, tab == Tab.Tasks)
         style(navProfileIcon, navProfileLabel, tab == Tab.Profile)
+    }
+
+    private fun refreshProfileCard() {
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            profileDisplayName.text = getString(R.string.profile_name_fallback)
+            profileEmail.text = ""
+            return
+        }
+        val name = AuthUserDisplayName.displayNameForProfile(token)
+        profileDisplayName.text = name.ifBlank { getString(R.string.profile_name_fallback) }
+        profileEmail.text = AuthUserDisplayName.emailFromAccessToken(token)
     }
 
     private fun refreshHomeHeader() {
