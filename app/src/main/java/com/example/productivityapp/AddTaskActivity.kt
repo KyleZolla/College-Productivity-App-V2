@@ -12,8 +12,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.android.material.timepicker.MaterialTimePicker
+import com.google.android.material.timepicker.TimeFormat
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.util.Calendar
 import java.util.concurrent.Executors
 
@@ -39,25 +42,49 @@ class AddTaskActivity : AppCompatActivity() {
         val createButton = findViewById<Button>(R.id.createTaskButton)
         val cancelButton = findViewById<Button>(R.id.cancelAddTaskButton)
 
-        var selectedDueDate: LocalDate? = null
-        val dateFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
+        var selectedDue: LocalDateTime? = null
+
+        fun refreshDueLabel() {
+            dueDateValue.text = selectedDue?.let { DueDateTimeFormat.displayFull(it) }
+                ?: getString(R.string.due_date_not_set)
+        }
 
         dueDateRow.setOnClickListener {
             val cal = Calendar.getInstance()
-            val initial = selectedDueDate
-            val initialYear = initial?.year ?: cal.get(Calendar.YEAR)
-            val initialMonth = (initial?.monthValue?.minus(1)) ?: cal.get(Calendar.MONTH)
-            val initialDay = initial?.dayOfMonth ?: cal.get(Calendar.DAY_OF_MONTH)
+            val initial = selectedDue ?: LocalDateTime.now()
+            val initialYear = initial.year
+            val initialMonth = initial.monthValue - 1
+            val initialDay = initial.dayOfMonth
 
-            DatePickerDialog(this, { _, year, month, dayOfMonth ->
-                selectedDueDate = LocalDate.of(year, month + 1, dayOfMonth)
-                dueDateValue.text = selectedDueDate?.format(dateFormatter) ?: getString(R.string.due_date_not_set)
-            }, initialYear, initialMonth, initialDay).show()
+            DatePickerDialog(
+                this,
+                { _, year, month, dayOfMonth ->
+                    val date = LocalDate.of(year, month + 1, dayOfMonth)
+                    val initialTime = selectedDue?.toLocalTime() ?: LocalTime.of(9, 0)
+                    val picker = MaterialTimePicker.Builder()
+                        .setTimeFormat(TimeFormat.CLOCK_12H)
+                        .setHour(initialTime.hour)
+                        .setMinute(initialTime.minute)
+                        .setTitleText(R.string.due_time_picker_title)
+                        .build()
+                    picker.addOnPositiveButtonClickListener {
+                        selectedDue = LocalDateTime.of(
+                            date,
+                            LocalTime.of(picker.hour, picker.minute),
+                        )
+                        refreshDueLabel()
+                    }
+                    picker.show(supportFragmentManager, "task_due_time")
+                },
+                initialYear,
+                initialMonth,
+                initialDay,
+            ).show()
         }
 
         createButton.setOnClickListener {
             val title = titleInput.text.toString().trim()
-            val due = selectedDueDate
+            val due = selectedDue
             if (title.isBlank()) {
                 Toast.makeText(this, R.string.error_task_title_required, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -89,7 +116,7 @@ class AddTaskActivity : AppCompatActivity() {
                     cancelButton.isEnabled = true
                     when (result) {
                         is SupabaseTasksApi.InsertResult.Success -> {
-                            val dueDisplay = due.format(dateFormatter)
+                            val dueDisplay = DueDateTimeFormat.displayFull(due)
                             startActivity(
                                 Intent(this, HomeActivity::class.java).apply {
                                     addFlags(
@@ -103,6 +130,8 @@ class AddTaskActivity : AppCompatActivity() {
                                     putExtra(TaskDetailActivity.EXTRA_TASK_ID, result.id)
                                     putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, title)
                                     putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_ISO, TaskDueParsing.toIsoParam(due))
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_STATUS, result.status.apiValue)
                                 }
                             )
                             finish()

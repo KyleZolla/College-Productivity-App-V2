@@ -8,13 +8,12 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
-import java.time.format.DateTimeFormatter
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 class TaskListAdapter(
     private val onTaskClick: (SupabaseTasksApi.TaskRow) -> Unit,
 ) : ListAdapter<SupabaseTasksApi.TaskRow, TaskListAdapter.TaskVH>(DIFF) {
-
-    private val dateFormat = DateTimeFormatter.ofPattern("MMM d, yyyy")
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TaskVH {
         val inflater = LayoutInflater.from(parent.context)
@@ -25,15 +24,24 @@ class TaskListAdapter(
     override fun onBindViewHolder(holder: TaskVH, position: Int) {
         val item = getItem(position)
         holder.title.text = item.title
-        val dueText = item.dueDate?.format(dateFormat)
-            ?: holder.itemView.context.getString(R.string.due_date_not_set)
-        holder.due.text = holder.itemView.context.getString(R.string.task_row_due_line, dueText)
+        holder.status.text = TaskStatusUi.label(item.status)
+        val ctx = holder.itemView.context
+        val today = LocalDate.now()
+        val due: LocalDateTime? = item.dueDate
+        val dueFormatted = due?.let { DueDateTimeFormat.displayListRow(it) }
+            ?: ctx.getString(R.string.due_date_not_set)
+        holder.due.text = if (DueDateHumanLabel.isOverdue(due, item.status)) {
+            ctx.getString(R.string.due_overdue_was_due, dueFormatted)
+        } else {
+            ctx.getString(R.string.task_row_due_line, dueFormatted)
+        }
         holder.card.setOnClickListener { onTaskClick(item) }
     }
 
     class TaskVH(root: View) : RecyclerView.ViewHolder(root) {
         val card: MaterialCardView = root as MaterialCardView
         val title: TextView = card.findViewById(R.id.taskRowTitle)
+        val status: TextView = card.findViewById(R.id.taskRowStatus)
         val due: TextView = card.findViewById(R.id.taskRowDue)
     }
 

@@ -24,6 +24,15 @@
             tools:text="Finish quarterly report" />
 
         <TextView
+            android:id="@+id/taskRowStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="Open" />
+
+        <TextView
             android:id="@+id/taskRowDue"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

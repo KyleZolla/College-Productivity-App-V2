@@ -50,5 +50,14 @@
                 android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
                 tools:text="Tomorrow" />
         </LinearLayout>
+
+        <TextView
+            android:id="@+id/homeCardStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="In progress" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

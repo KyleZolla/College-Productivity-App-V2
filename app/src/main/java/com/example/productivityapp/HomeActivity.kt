@@ -60,8 +60,6 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var profileDisplayName: TextView
     private lateinit var profileEmail: TextView
 
-    private val detailDueFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -91,6 +89,10 @@ class HomeActivity : AppCompatActivity() {
         tasksRecyclerView.layoutManager = LinearLayoutManager(this)
         tasksAdapter = TaskListAdapter { task -> openTaskDetail(task) }
         tasksRecyclerView.adapter = tasksAdapter
+
+        findViewById<TextView>(R.id.tasksViewCompletedButton).setOnClickListener {
+            startActivity(Intent(this, CompletedTasksActivity::class.java))
+        }
 
         homeDateLine = findViewById(R.id.homeDateLine)
         homeGreetingLine = findViewById(R.id.homeGreetingLine)
@@ -138,12 +140,24 @@ class HomeActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         when (currentTab) {
-            Tab.Tasks -> loadTasks()
+            Tab.Tasks -> loadTasks(showLoading = true)
             Tab.Home -> {
                 refreshHomeHeader()
-                loadHomeUpcoming()
+                loadHomeUpcoming(showLoading = true)
             }
             Tab.Profile -> refreshProfileCard()
+        }
+        val token = SessionManager.getAccessToken(this)
+        if (!token.isNullOrBlank()) {
+            // Keep home cards and task list aligned with Supabase (e.g. after status edit on detail).
+            when (currentTab) {
+                Tab.Home -> loadTasks(showLoading = false)
+                Tab.Tasks -> loadHomeUpcoming(showLoading = false)
+                Tab.Profile -> {
+                    loadHomeUpcoming(showLoading = false)
+                    loadTasks(showLoading = false)
+                }
+            }
         }
     }
 
@@ -175,10 +189,10 @@ class HomeActivity : AppCompatActivity() {
         panelProfile.visibility = if (tab == Tab.Profile) View.VISIBLE else View.GONE
 
         when (tab) {
-            Tab.Tasks -> loadTasks()
+            Tab.Tasks -> loadTasks(showLoading = true)
             Tab.Home -> {
                 refreshHomeHeader()
-                loadHomeUpcoming()
+                loadHomeUpcoming(showLoading = true)
             }
             Tab.Profile -> refreshProfileCard()
         }
@@ -226,7 +240,7 @@ class HomeActivity : AppCompatActivity() {
         homeGreetingLine.text = getString(res, name)
     }
 
-    private fun loadHomeUpcoming() {
+    private fun loadHomeUpcoming(showLoading: Boolean = true) {
         val token = SessionManager.getAccessToken(this)
         if (token.isNullOrBlank()) {
             homeUpcomingLoading.visibility = View.GONE
@@ -237,28 +251,32 @@ class HomeActivity : AppCompatActivity() {
             return
         }
 
-        homeUpcomingLoading.visibility = View.VISIBLE
-        homeUpcomingEmpty.visibility = View.GONE
-        homeUpcomingCards.visibility = View.GONE
+        if (showLoading) {
+            homeUpcomingLoading.visibility = View.VISIBLE
+            homeUpcomingEmpty.visibility = View.GONE
+            homeUpcomingCards.visibility = View.GONE
+        }
 
         networkExecutor.execute {
-            when (val result = SupabaseTasksApi.listTasks(token)) {
+            when (val result = SupabaseTasksApi.listTasks(token, TaskListFilter.ACTIVE)) {
                 is SupabaseTasksApi.ListResult.Success -> runOnUiThread {
-                    homeUpcomingLoading.visibility = View.GONE
+                    if (showLoading) homeUpcomingLoading.visibility = View.GONE
                     bindHomePreviewCards(result.tasks.take(3))
                 }
                 is SupabaseTasksApi.ListResult.Failure -> runOnUiThread {
-                    homeUpcomingLoading.visibility = View.GONE
-                    homeUpcomingCards.removeAllViews()
-                    homeUpcomingCards.visibility = View.GONE
-                    homeUpcomingEmpty.text =
-                        getString(R.string.home_upcoming_load_failed) + "\n" + result.message
-                    homeUpcomingEmpty.visibility = View.VISIBLE
-                    Toast.makeText(
-                        this,
-                        getString(R.string.home_upcoming_load_failed) + "\n" + result.message,
-                        Toast.LENGTH_LONG
-                    ).show()
+                    if (showLoading) homeUpcomingLoading.visibility = View.GONE
+                    if (showLoading) {
+                        homeUpcomingCards.removeAllViews()
+                        homeUpcomingCards.visibility = View.GONE
+                        homeUpcomingEmpty.text =
+                            getString(R.string.home_upcoming_load_failed) + "\n" + result.message
+                        homeUpcomingEmpty.visibility = View.VISIBLE
+                        Toast.makeText(
+                            this,
+                            getString(R.string.home_upcoming_load_failed) + "\n" + result.message,
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
         }
@@ -293,11 +311,14 @@ class HomeActivity : AppCompatActivity() {
         val card = root.findViewById<MaterialCardView>(R.id.homeTaskCard)
         val title = root.findViewById<TextView>(R.id.homeCardTitle)
         val duePill = root.findViewById<TextView>(R.id.homeCardDuePill)
+        val statusLine = root.findViewById<TextView>(R.id.homeCardStatus)
 
         title.text = task.title
-        duePill.text = DueDateHumanLabel.format(this, task.dueDate, today)
+        duePill.text = DueDateHumanLabel.format(this, task.dueDate, today, task.status)
+        statusLine.text = TaskStatusUi.label(task.status)
 
-        if (urgent) {
+        val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
+        if (urgent || overdue) {
             card.setCardBackgroundColor(ContextCompat.getColor(this, R.color.home_urgent_card_fill))
             card.strokeWidth = resources.getDimensionPixelSize(R.dimen.home_urgent_card_stroke_width)
             card.strokeColor = ContextCompat.getColor(this, R.color.home_urgent_card_stroke)
@@ -316,18 +337,10 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun openTaskDetail(task: SupabaseTasksApi.TaskRow) {
-        val dueDisplay = task.dueDate?.format(detailDueFormatter)
-            ?: getString(R.string.due_date_not_set)
-        startActivity(
-            Intent(this, TaskDetailActivity::class.java).apply {
-                putExtra(TaskDetailActivity.EXTRA_TASK_ID, task.id)
-                putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, task.title)
-                putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
-            }
-        )
+        startActivity(TaskDetailActivity.createIntent(this, task))
     }
 
-    private fun loadTasks() {
+    private fun loadTasks(showLoading: Boolean = true) {
         val token = SessionManager.getAccessToken(this)
         if (token.isNullOrBlank()) {
             tasksAdapter.submitList(emptyList())
@@ -338,14 +351,16 @@ class HomeActivity : AppCompatActivity() {
             return
         }
 
-        tasksLoading.visibility = View.VISIBLE
-        tasksEmptyView.visibility = View.GONE
-        tasksRecyclerView.visibility = View.INVISIBLE
+        if (showLoading) {
+            tasksLoading.visibility = View.VISIBLE
+            tasksEmptyView.visibility = View.GONE
+            tasksRecyclerView.visibility = View.INVISIBLE
+        }
 
         networkExecutor.execute {
-            when (val result = SupabaseTasksApi.listTasks(token)) {
+            when (val result = SupabaseTasksApi.listTasks(token, TaskListFilter.ACTIVE)) {
                 is SupabaseTasksApi.ListResult.Success -> runOnUiThread {
-                    tasksLoading.visibility = View.GONE
+                    if (showLoading) tasksLoading.visibility = View.GONE
                     tasksAdapter.submitList(result.tasks)
                     if (result.tasks.isEmpty()) {
                         tasksEmptyView.text = getString(R.string.tasks_empty)
@@ -353,21 +368,24 @@ class HomeActivity : AppCompatActivity() {
                         tasksRecyclerView.visibility = View.GONE
                     } else {
                         tasksEmptyView.visibility = View.GONE
-                        tasksRecyclerView.visibility = View.VISIBLE
+                        tasksRecyclerView.visibility =
+                            if (panelTasks.visibility == View.VISIBLE) View.VISIBLE else View.GONE
                     }
                 }
                 is SupabaseTasksApi.ListResult.Failure -> runOnUiThread {
-                    tasksLoading.visibility = View.GONE
-                    tasksRecyclerView.visibility = View.GONE
-                    tasksAdapter.submitList(emptyList())
-                    tasksEmptyView.text =
-                        getString(R.string.error_tasks_load_failed) + "\n" + result.message
-                    tasksEmptyView.visibility = View.VISIBLE
-                    Toast.makeText(
-                        this,
-                        getString(R.string.error_tasks_load_failed) + "\n" + result.message,
-                        Toast.LENGTH_LONG
-                    ).show()
+                    if (showLoading) tasksLoading.visibility = View.GONE
+                    if (showLoading) {
+                        tasksRecyclerView.visibility = View.GONE
+                        tasksAdapter.submitList(emptyList())
+                        tasksEmptyView.text =
+                            getString(R.string.error_tasks_load_failed) + "\n" + result.message
+                        tasksEmptyView.visibility = View.VISIBLE
+                        Toast.makeText(
+                            this,
+                            getString(R.string.error_tasks_load_failed) + "\n" + result.message,
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
         }
