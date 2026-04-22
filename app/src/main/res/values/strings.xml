@@ -93,4 +93,33 @@
     <string name="due_relative_yesterday">Yesterday</string>
     <string name="due_relative_next_weekday">Next %1$s</string>
     <string name="due_relative_none">No date</string>
+
+    <string name="add_task_ai_section_title">Help the AI build your roadmap</string>
+    <string name="add_task_ai_section_subtitle">Optional — the more context you give, the better the breakdown</string>
+    <string name="add_task_ai_upload_document_title">Upload a document</string>
+    <string name="add_task_ai_upload_document_subtitle">Rubric, syllabus, or assignment sheet</string>
+    <string name="add_task_ai_upload_photo_title">Upload a photo</string>
+    <string name="add_task_ai_upload_photo_subtitle">Take a picture of a handout or whiteboard</string>
+    <string name="add_task_ai_answer_questions_title">Answer a few questions</string>
+    <string name="add_task_ai_answer_questions_subtitle">Tell the AI about the assignment</string>
+    <string name="add_task_ai_doc_picker_button">Choose document</string>
+    <string name="add_task_ai_doc_selected">Selected: %1$s</string>
+    <string name="add_task_ai_doc_none">No document selected</string>
+    <string name="add_task_ai_photo_picker_button">Choose photo</string>
+    <string name="add_task_ai_photo_selected">Selected: %1$s</string>
+    <string name="add_task_ai_photo_none">No photo selected</string>
+
+    <string name="add_task_ai_questions_assignment_type_label">Assignment type</string>
+    <string name="add_task_ai_questions_type_essay">Essay</string>
+    <string name="add_task_ai_questions_type_project">Project</string>
+    <string name="add_task_ai_questions_type_exam">Exam</string>
+    <string name="add_task_ai_questions_type_presentation">Presentation</string>
+    <string name="add_task_ai_questions_type_homework">Homework</string>
+    <string name="add_task_ai_questions_type_other">Other</string>
+    <string name="add_task_ai_questions_difficulty_label">Difficulty</string>
+    <string name="add_task_ai_questions_difficulty_easy">Easy</string>
+    <string name="add_task_ai_questions_difficulty_medium">Medium</string>
+    <string name="add_task_ai_questions_difficulty_hard">Hard</string>
+    <string name="add_task_ai_questions_additional_details_label">Additional details</string>
+    <string name="add_task_ai_questions_additional_details_hint">Anything important (requirements, length, topics, constraints)…</string>
 </resources>
