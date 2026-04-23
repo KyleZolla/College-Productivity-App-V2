@@ -3,6 +3,7 @@ package com.example.productivityapp
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -35,6 +36,14 @@ class TaskListAdapter(
         } else {
             ctx.getString(R.string.task_row_due_line, dueFormatted)
         }
+
+        val summary = RoadmapProgress.summarize(item.roadmap)
+        if (summary.total <= 0) {
+            holder.progress.visibility = View.GONE
+        } else {
+            holder.progress.visibility = View.VISIBLE
+            holder.progress.progress = summary.percent
+        }
         holder.card.setOnClickListener { onTaskClick(item) }
     }
 
@@ -43,6 +52,7 @@ class TaskListAdapter(
         val title: TextView = card.findViewById(R.id.taskRowTitle)
         val status: TextView = card.findViewById(R.id.taskRowStatus)
         val due: TextView = card.findViewById(R.id.taskRowDue)
+        val progress: ProgressBar = card.findViewById(R.id.taskRowProgress)
     }
 
     companion object {

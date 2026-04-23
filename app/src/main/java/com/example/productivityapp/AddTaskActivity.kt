@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
@@ -29,6 +30,7 @@ class AddTaskActivity : AppCompatActivity() {
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "AddTaskActivity"
+    private var activeDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -212,6 +214,7 @@ class AddTaskActivity : AppCompatActivity() {
             val assignmentType = selectedAssignmentType
             val difficulty = selectedDifficulty
             val requirements = additionalDetailsInput.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
+            val selectedDoc = selectedDocUri
 
             createButton.isEnabled = false
             cancelButton.isEnabled = false
@@ -239,13 +242,35 @@ class AddTaskActivity : AppCompatActivity() {
                         val taskId = insertResult.id
                         val dueIso = TaskDueParsing.toIsoParam(due)
 
+                        val documentContent = selectedDoc?.let { uri ->
+                            when (val res = DocumentContentExtractor.extractText(this, uri)) {
+                                is DocumentContentExtractor.Result.Success -> res.content
+                                is DocumentContentExtractor.Result.Failure -> {
+                                    runOnUiThread {
+                                        val msg = "Could not read document.\n${res.message}"
+                                        Log.w(logTag, msg)
+                                        if (!isFinishing && !isDestroyed) {
+                                            activeDialog?.dismiss()
+                                            activeDialog = MaterialAlertDialogBuilder(this)
+                                                .setTitle("Document upload skipped")
+                                                .setMessage(res.message)
+                                                .setPositiveButton(android.R.string.ok, null)
+                                                .show()
+                                        }
+                                    }
+                                    null
+                                }
+                            }
+                        }
+
                         val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
                             title = title,
                             dueDateIso = dueIso,
                             assignmentType = assignmentType,
                             difficulty = difficulty,
-                            requirements = requirements
+                            requirements = requirements,
+                            documentContent = documentContent,
                         )) {
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {
@@ -253,7 +278,8 @@ class AddTaskActivity : AppCompatActivity() {
                                     val msg = "Roadmap generation failed.\n${roadmapResult.message}"
                                     Log.e(logTag, msg)
                                     if (!isFinishing && !isDestroyed) {
-                                        MaterialAlertDialogBuilder(this)
+                                        activeDialog?.dismiss()
+                                        activeDialog = MaterialAlertDialogBuilder(this)
                                             .setTitle("Roadmap generation failed")
                                             .setMessage(roadmapResult.message)
                                             .setPositiveButton(android.R.string.ok, null)
@@ -269,7 +295,8 @@ class AddTaskActivity : AppCompatActivity() {
                                 val msg = "Edge Function returned 0 steps. Will save empty roadmap."
                                 Log.w(logTag, msg)
                                 if (!isFinishing && !isDestroyed) {
-                                    MaterialAlertDialogBuilder(this)
+                                    activeDialog?.dismiss()
+                                    activeDialog = MaterialAlertDialogBuilder(this)
                                         .setTitle("No roadmap steps returned")
                                         .setMessage(
                                             "The Edge Function returned 0 steps. The task will be created, but its roadmap will be empty.\n\nCheck your Edge Function output format."
@@ -289,7 +316,8 @@ class AddTaskActivity : AppCompatActivity() {
                                 val msg = "Could not save roadmap.\n${patchResult.message}"
                                 Log.e(logTag, msg)
                                 if (!isFinishing && !isDestroyed) {
-                                    MaterialAlertDialogBuilder(this)
+                                    activeDialog?.dismiss()
+                                    activeDialog = MaterialAlertDialogBuilder(this)
                                         .setTitle("Could not save roadmap")
                                         .setMessage(patchResult.message)
                                         .setPositiveButton(android.R.string.ok, null)
@@ -333,6 +361,8 @@ class AddTaskActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        activeDialog?.dismiss()
+        activeDialog = null
         super.onDestroy()
         networkExecutor.shutdownNow()
     }

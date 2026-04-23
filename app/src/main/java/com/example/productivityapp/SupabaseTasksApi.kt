@@ -30,11 +30,17 @@ object SupabaseTasksApi {
         val title: String,
         val dueDate: LocalDateTime?,
         val status: TaskStatus,
+        val roadmap: JSONArray?,
     )
 
     sealed class ListResult {
         data class Success(val tasks: List<TaskRow>) : ListResult()
         data class Failure(val message: String) : ListResult()
+    }
+
+    sealed class GetResult {
+        data class Success(val task: TaskRow) : GetResult()
+        data class Failure(val message: String) : GetResult()
     }
 
     sealed class InsertResult {
@@ -72,7 +78,7 @@ object SupabaseTasksApi {
                 TaskListFilter.ACTIVE -> "status=neq.${enc(TaskStatus.COMPLETE.apiValue)}"
                 TaskListFilter.COMPLETED -> "status=eq.${enc(TaskStatus.COMPLETE.apiValue)}"
             }
-            val query = "select=id,title,dueDate,status&$statusParam&order=dueDate.asc.nullslast"
+            val query = "select=id,title,dueDate,status,roadmap&$statusParam&order=dueDate.asc.nullslast"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -102,7 +108,8 @@ object SupabaseTasksApi {
                             else -> obj.getString("status")
                         }
                     )
-                    out.add(TaskRow(id = id, title = title, dueDate = due, status = status))
+                    val roadmap = parseRoadmap(obj.opt("roadmap"))
+                    out.add(TaskRow(id = id, title = title, dueDate = due, status = status, roadmap = roadmap))
                 }
                 ListResult.Success(out)
             } else {
@@ -116,6 +123,73 @@ object SupabaseTasksApi {
     private fun parseDueDate(raw: Any?): LocalDateTime? {
         if (raw == null || raw == JSONObject.NULL) return null
         return TaskDueParsing.parseFlexible(raw.toString().trim())
+    }
+
+    private fun parseRoadmap(raw: Any?): JSONArray? {
+        if (raw == null || raw == JSONObject.NULL) return null
+        return try {
+            when (raw) {
+                is JSONArray -> raw
+                is JSONObject -> raw.optJSONArray("steps")
+                else -> {
+                    val s = raw.toString().trim()
+                    when {
+                        s.isEmpty() || s == "null" -> null
+                        s.startsWith("[") -> JSONArray(s)
+                        s.startsWith("{") -> JSONObject(s).optJSONArray("steps")
+                        else -> null
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun getTask(accessToken: String, taskId: String): GetResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return GetResult.Failure("Missing Supabase config.")
+        }
+        val idFilter = taskId.trim()
+        if (idFilter.isEmpty()) return GetResult.Failure("Missing task id.")
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val query = "select=id,title,dueDate,status,roadmap&id=eq.$idFilter"
+            val url = URL("$base/rest/v1/tasks?$query")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode !in 200..299) {
+                return GetResult.Failure(parseError(responseBody, responseCode))
+            }
+            val arr = JSONArray(responseBody)
+            if (arr.length() == 0) return GetResult.Failure("Task not found.")
+            val obj = arr.getJSONObject(0)
+            val id = obj.opt("id")?.toString()?.takeIf { it.isNotBlank() } ?: return GetResult.Failure("Task missing id.")
+            val title = obj.optString("title")
+            val due = parseDueDate(obj.opt("dueDate"))
+            val status = TaskStatus.fromApi(
+                when {
+                    !obj.has("status") || obj.isNull("status") -> null
+                    else -> obj.getString("status")
+                }
+            )
+            val roadmap = parseRoadmap(obj.opt("roadmap"))
+            GetResult.Success(TaskRow(id = id, title = title, dueDate = due, status = status, roadmap = roadmap))
+        } catch (e: Exception) {
+            GetResult.Failure(e.message ?: "Network error.")
+        }
     }
 
     fun insertTask(

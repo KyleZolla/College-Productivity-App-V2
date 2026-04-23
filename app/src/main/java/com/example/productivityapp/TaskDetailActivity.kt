@@ -5,18 +5,20 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
-import com.google.android.material.chip.Chip
-import com.google.android.material.chip.ChipGroup
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
+import org.json.JSONArray
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -26,17 +28,22 @@ import java.util.concurrent.Executors
 class TaskDetailActivity : AppCompatActivity() {
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
-    private lateinit var statusChipGroup: ChipGroup
-    private lateinit var saveStatusButton: MaterialButton
     private var editDueButton: MaterialButton? = null
     private var saveDueButton: MaterialButton? = null
     private lateinit var dueValue: TextView
+    private lateinit var statusLine: TextView
     private lateinit var taskId: String
     /** Last value confirmed from Supabase (or from the intent when opened). */
     private var savedStatus: TaskStatus = TaskStatus.NOT_STARTED
     private var savedDue: LocalDateTime? = null
     private var draftDue: LocalDateTime? = null
-    private var applyingChipSelection = false
+    private lateinit var roadmapProgress: ProgressBar
+    private lateinit var roadmapProgressLabel: TextView
+    private lateinit var roadmapList: RecyclerView
+    private lateinit var roadmapAdapter: RoadmapStepsAdapter
+    private var roadmapSteps: MutableList<RoadmapStep> = mutableListOf()
+    private var roadmapPatchInFlight = false
+    private var statusPatchInFlight = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,97 +76,155 @@ class TaskDetailActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.taskDetailName).text = title
         dueValue = findViewById(R.id.taskDetailDueDate)
-        refreshDueLabel()
+        statusLine = findViewById(R.id.taskDetailStatusLine)
 
-        statusChipGroup = findViewById(R.id.taskDetailStatusChips)
-        saveStatusButton = findViewById(R.id.taskDetailSaveStatus)
         editDueButton = findViewById(R.id.taskDetailEditDue)
         saveDueButton = findViewById(R.id.taskDetailSaveDue)
 
-        findViewById<Chip>(R.id.chipTaskStatusNotStarted).text = TaskStatus.NOT_STARTED.apiValue
-        findViewById<Chip>(R.id.chipTaskStatusInProgress).text = TaskStatus.IN_PROGRESS.apiValue
-        findViewById<Chip>(R.id.chipTaskStatusComplete).text = TaskStatus.COMPLETE.apiValue
+        roadmapProgress = findViewById(R.id.taskDetailRoadmapProgress)
+        roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
+        roadmapList = findViewById(R.id.taskDetailRoadmapList)
+        roadmapAdapter = RoadmapStepsAdapter { index, checked -> onRoadmapStepToggled(index, checked) }
+        roadmapList.layoutManager = LinearLayoutManager(this)
+        roadmapList.adapter = roadmapAdapter
 
-        applyChipSelection(savedStatus)
-
-        statusChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (applyingChipSelection || checkedIds.isEmpty()) return@setOnCheckedStateChangeListener
-            updateSaveEnabled()
-        }
-
-        saveStatusButton.setOnClickListener { persistStatusToDatabase() }
+        // Now that views are wired, we can render labels safely.
+        refreshStatusLine(savedStatus)
+        refreshDueLabel()
         editDueButton?.setOnClickListener { pickDueDateTime() }
         saveDueButton?.setOnClickListener { persistDueToDatabase() }
 
         updateSaveEnabled()
+
+        fetchLatestTask()
+    }
+
+    private fun fetchLatestTask() {
+        val token = SessionManager.getAccessToken(this) ?: return
+        networkExecutor.execute {
+            when (val result = SupabaseTasksApi.getTask(token, taskId)) {
+                is SupabaseTasksApi.GetResult.Failure -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+                }
+                is SupabaseTasksApi.GetResult.Success -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    savedStatus = result.task.status
+                    refreshStatusLine(savedStatus)
+                    savedDue = result.task.dueDate
+                    draftDue = savedDue
+                    refreshDueLabel()
+
+                    roadmapSteps = RoadmapStep.parseList(result.task.roadmap).toMutableList()
+                    if (roadmapSteps.isNotEmpty()) {
+                        roadmapAdapter.submitList(roadmapSteps)
+                    } else {
+                        roadmapAdapter.submitList(emptyList())
+                    }
+                    refreshRoadmapProgress()
+                    updateSaveEnabled()
+
+                    // Ensure status stays consistent with roadmap progress.
+                    val derived = deriveStatusFromSteps(roadmapSteps)
+                    if (derived != savedStatus) {
+                        persistDerivedStatus(derived)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun refreshRoadmapProgress() {
+        val completed = roadmapSteps.count { it.completed }
+        val total = roadmapSteps.size
+        val percent = if (total == 0) 0 else ((completed.toDouble() / total.toDouble()) * 100.0).toInt()
+        roadmapProgress.progress = percent
+        roadmapProgressLabel.text = "$completed/$total steps completed"
+    }
+
+    private fun onRoadmapStepToggled(index: Int, checked: Boolean) {
+        if (index < 0 || index >= roadmapSteps.size) return
+        val cur = roadmapSteps[index]
+        if (cur.completed == checked) return
+        roadmapSteps[index] = cur.copy(completed = checked)
+        roadmapAdapter.submitList(roadmapSteps.toList())
+        refreshRoadmapProgress()
+        persistRoadmapToDatabase()
+
+        val derived = deriveStatusFromSteps(roadmapSteps)
+        if (derived != savedStatus) {
+            persistDerivedStatus(derived)
+        }
+    }
+
+    private fun persistRoadmapToDatabase() {
+        if (roadmapPatchInFlight) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        roadmapPatchInFlight = true
+        val payload: JSONArray = RoadmapStep.toJsonArray(roadmapSteps)
+        networkExecutor.execute {
+            val result = SupabaseTasksApi.updateTaskRoadmap(token, taskId, payload)
+            runOnUiThread {
+                roadmapPatchInFlight = false
+                if (isFinishing) return@runOnUiThread
+                if (result is SupabaseTasksApi.PatchRoadmapResult.Failure) {
+                    Toast.makeText(
+                        this,
+                        "Could not save progress.\n${result.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun refreshDueLabel() {
         val display = draftDue?.let { DueDateTimeFormat.displayFull(it) }
             ?: getString(R.string.due_date_not_set)
-        val effectiveStatus = if (::statusChipGroup.isInitialized) {
-            statusFromCheckedChip() ?: savedStatus
-        } else {
-            savedStatus
-        }
+        val effectiveStatus = savedStatus
         val dueLine = if (DueDateHumanLabel.isOverdue(draftDue, effectiveStatus)) {
             getString(R.string.due_overdue_was_due, display)
         } else {
             display
         }
         dueValue.text = dueLine
-        // onCreate() calls this before all views are wired up.
-        if (::statusChipGroup.isInitialized) {
-            updateSaveEnabled()
-        }
-    }
-
-    private fun statusFromCheckedChip(): TaskStatus? {
-        return when (statusChipGroup.checkedChipId) {
-            R.id.chipTaskStatusNotStarted -> TaskStatus.NOT_STARTED
-            R.id.chipTaskStatusInProgress -> TaskStatus.IN_PROGRESS
-            R.id.chipTaskStatusComplete -> TaskStatus.COMPLETE
-            View.NO_ID -> null
-            else -> null
-        }
+        updateSaveEnabled()
     }
 
     private fun updateSaveEnabled() {
-        val draft = statusFromCheckedChip()
-        saveStatusButton.isEnabled = draft != null && draft != savedStatus
         saveDueButton?.isEnabled = draftDue != savedDue
     }
 
-    private fun persistStatusToDatabase() {
-        val token = SessionManager.getAccessToken(this)
-        if (token.isNullOrBlank()) {
-            Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
-            return
+    private fun refreshStatusLine(status: TaskStatus) {
+        statusLine.text = "Status: ${status.apiValue}"
+    }
+
+    private fun deriveStatusFromSteps(steps: List<RoadmapStep>): TaskStatus {
+        if (steps.isEmpty()) return TaskStatus.NOT_STARTED
+        val completed = steps.count { it.completed }
+        return when {
+            completed <= 0 -> TaskStatus.NOT_STARTED
+            completed >= steps.size -> TaskStatus.COMPLETE
+            else -> TaskStatus.IN_PROGRESS
         }
-        val target = statusFromCheckedChip() ?: return
-        if (target == savedStatus) return
+    }
 
-        saveStatusButton.isEnabled = false
-        statusChipGroup.isEnabled = false
-        saveStatusButton.text = getString(R.string.task_detail_saving_status)
-
+    private fun persistDerivedStatus(status: TaskStatus) {
+        if (statusPatchInFlight) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        statusPatchInFlight = true
         networkExecutor.execute {
-            when (val result = SupabaseTasksApi.updateTaskStatus(token, taskId, target)) {
+            when (val result = SupabaseTasksApi.updateTaskStatus(token, taskId, status)) {
                 is SupabaseTasksApi.PatchResult.Success -> runOnUiThread {
+                    statusPatchInFlight = false
                     if (isFinishing) return@runOnUiThread
                     savedStatus = result.status
-                    applyChipSelection(savedStatus)
-                    saveStatusButton.text = getString(R.string.task_detail_save_status)
-                    statusChipGroup.isEnabled = true
-                    updateSaveEnabled()
-                    Toast.makeText(this, R.string.task_detail_status_saved, Toast.LENGTH_SHORT).show()
+                    refreshStatusLine(savedStatus)
+                    refreshDueLabel()
                 }
                 is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
+                    statusPatchInFlight = false
                     if (isFinishing) return@runOnUiThread
-                    saveStatusButton.text = getString(R.string.task_detail_save_status)
-                    statusChipGroup.isEnabled = true
-                    applyChipSelection(savedStatus)
-                    updateSaveEnabled()
                     Toast.makeText(
                         this,
                         getString(R.string.error_task_status_update_failed) + "\n" + result.message,
@@ -236,17 +301,6 @@ class TaskDetailActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    private fun applyChipSelection(status: TaskStatus) {
-        applyingChipSelection = true
-        val chipId = when (status) {
-            TaskStatus.NOT_STARTED -> R.id.chipTaskStatusNotStarted
-            TaskStatus.IN_PROGRESS -> R.id.chipTaskStatusInProgress
-            TaskStatus.COMPLETE -> R.id.chipTaskStatusComplete
-        }
-        statusChipGroup.check(chipId)
-        applyingChipSelection = false
     }
 
     override fun onDestroy() {

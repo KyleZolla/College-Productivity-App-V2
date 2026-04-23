@@ -312,10 +312,19 @@ class HomeActivity : AppCompatActivity() {
         val title = root.findViewById<TextView>(R.id.homeCardTitle)
         val duePill = root.findViewById<TextView>(R.id.homeCardDuePill)
         val statusLine = root.findViewById<TextView>(R.id.homeCardStatus)
+        val progress = root.findViewById<ProgressBar>(R.id.homeCardProgress)
 
         title.text = task.title
         duePill.text = DueDateHumanLabel.format(this, task.dueDate, today, task.status)
         statusLine.text = TaskStatusUi.label(task.status)
+
+        val summary = RoadmapProgress.summarize(task.roadmap)
+        if (summary.total <= 0) {
+            progress.visibility = View.GONE
+        } else {
+            progress.visibility = View.VISIBLE
+            progress.progress = summary.percent
+        }
 
         val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
         if (urgent || overdue) {
