@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -14,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import java.time.LocalDate
@@ -21,10 +23,12 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.Calendar
 import java.util.concurrent.Executors
+import org.json.JSONArray
 
 class AddTaskActivity : AppCompatActivity() {
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
+    private val logTag = "AddTaskActivity"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -205,16 +209,99 @@ class AddTaskActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
+            val assignmentType = selectedAssignmentType
+            val difficulty = selectedDifficulty
+            val requirements = additionalDetailsInput.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
+
             createButton.isEnabled = false
             cancelButton.isEnabled = false
+            val originalCreateText = createButton.text
+            createButton.text = getString(R.string.status_creating_task)
 
             networkExecutor.execute {
-                val result = SupabaseTasksApi.insertTask(accessToken, userId, title, due)
+                val insertResult = SupabaseTasksApi.insertTask(accessToken, userId, title, due)
                 runOnUiThread {
                     createButton.isEnabled = true
                     cancelButton.isEnabled = true
-                    when (result) {
-                        is SupabaseTasksApi.InsertResult.Success -> {
+                    createButton.text = originalCreateText
+                }
+
+                when (insertResult) {
+                    is SupabaseTasksApi.InsertResult.Failure -> runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            getString(R.string.error_task_create_failed) + "\n" + insertResult.message,
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+
+                    is SupabaseTasksApi.InsertResult.Success -> {
+                        val taskId = insertResult.id
+                        val dueIso = TaskDueParsing.toIsoParam(due)
+
+                        val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
+                            accessToken = accessToken,
+                            title = title,
+                            dueDateIso = dueIso,
+                            assignmentType = assignmentType,
+                            difficulty = difficulty,
+                            requirements = requirements
+                        )) {
+                            is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
+                            is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {
+                                runOnUiThread {
+                                    val msg = "Roadmap generation failed.\n${roadmapResult.message}"
+                                    Log.e(logTag, msg)
+                                    if (!isFinishing && !isDestroyed) {
+                                        MaterialAlertDialogBuilder(this)
+                                            .setTitle("Roadmap generation failed")
+                                            .setMessage(roadmapResult.message)
+                                            .setPositiveButton(android.R.string.ok, null)
+                                            .show()
+                                    }
+                                }
+                                JSONArray()
+                            }
+                        }
+
+                        if (roadmapSteps.length() == 0) {
+                            runOnUiThread {
+                                val msg = "Edge Function returned 0 steps. Will save empty roadmap."
+                                Log.w(logTag, msg)
+                                if (!isFinishing && !isDestroyed) {
+                                    MaterialAlertDialogBuilder(this)
+                                        .setTitle("No roadmap steps returned")
+                                        .setMessage(
+                                            "The Edge Function returned 0 steps. The task will be created, but its roadmap will be empty.\n\nCheck your Edge Function output format."
+                                        )
+                                        .setPositiveButton(android.R.string.ok, null)
+                                        .show()
+                                }
+                            }
+                        }
+
+                        when (val patchResult = SupabaseTasksApi.updateTaskRoadmap(
+                            accessToken = accessToken,
+                            taskId = taskId,
+                            roadmapSteps = roadmapSteps
+                        )) {
+                            is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
+                                val msg = "Could not save roadmap.\n${patchResult.message}"
+                                Log.e(logTag, msg)
+                                if (!isFinishing && !isDestroyed) {
+                                    MaterialAlertDialogBuilder(this)
+                                        .setTitle("Could not save roadmap")
+                                        .setMessage(patchResult.message)
+                                        .setPositiveButton(android.R.string.ok, null)
+                                        .show()
+                                }
+                            }
+                            SupabaseTasksApi.PatchRoadmapResult.Success -> runOnUiThread {
+                                Log.d(logTag, "Roadmap saved for taskId=$taskId steps=${roadmapSteps.length()}")
+                            }
+                        }
+
+                        runOnUiThread {
                             val dueDisplay = DueDateTimeFormat.displayFull(due)
                             startActivity(
                                 Intent(this, HomeActivity::class.java).apply {
@@ -226,21 +313,14 @@ class AddTaskActivity : AppCompatActivity() {
                             )
                             startActivity(
                                 Intent(this, TaskDetailActivity::class.java).apply {
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_ID, result.id)
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_ID, taskId)
                                     putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, title)
                                     putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_ISO, TaskDueParsing.toIsoParam(due))
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_STATUS, result.status.apiValue)
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_ISO, dueIso)
+                                    putExtra(TaskDetailActivity.EXTRA_TASK_STATUS, insertResult.status.apiValue)
                                 }
                             )
                             finish()
-                        }
-                        is SupabaseTasksApi.InsertResult.Failure -> {
-                            Toast.makeText(
-                                this,
-                                getString(R.string.error_task_create_failed) + "\n" + result.message,
-                                Toast.LENGTH_LONG
-                            ).show()
                         }
                     }
                 }

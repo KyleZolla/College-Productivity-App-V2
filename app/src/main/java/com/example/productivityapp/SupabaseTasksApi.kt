@@ -52,6 +52,11 @@ object SupabaseTasksApi {
         data class Failure(val message: String) : PatchDueResult()
     }
 
+    sealed class PatchRoadmapResult {
+        object Success : PatchRoadmapResult()
+        data class Failure(val message: String) : PatchRoadmapResult()
+    }
+
     fun listTasks(accessToken: String, filter: TaskListFilter = TaskListFilter.ACTIVE): ListResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return ListResult.Failure("Missing Supabase config.")
@@ -300,6 +305,49 @@ object SupabaseTasksApi {
             }
         } catch (e: Exception) {
             PatchDueResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
+    fun updateTaskRoadmap(accessToken: String, taskId: String, roadmapSteps: JSONArray): PatchRoadmapResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return PatchRoadmapResult.Failure("Missing Supabase config.")
+        }
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val idFilter = taskId.trim()
+            if (idFilter.isEmpty()) {
+                return PatchRoadmapResult.Failure("Missing task id.")
+            }
+            val url = URL("$base/rest/v1/tasks?id=eq.$idFilter")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=minimal")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject().put("roadmap", roadmapSteps)
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode in 200..299) {
+                PatchRoadmapResult.Success
+            } else {
+                PatchRoadmapResult.Failure(parseError(responseBody, responseCode))
+            }
+        } catch (e: Exception) {
+            PatchRoadmapResult.Failure(e.message ?: "Network error.")
         }
     }
 
