@@ -52,7 +52,7 @@ class AddTaskActivity : AppCompatActivity() {
 
         var selectedDue: LocalDateTime? = null
 
-        // AI roadmap helpers (UI only for now).
+        // AI roadmap helpers (optional context for roadmap generation).
         val uploadDocCard = findViewById<com.google.android.material.card.MaterialCardView>(R.id.addTaskAiUploadDoc)
         val uploadDocPanel = findViewById<LinearLayout>(R.id.addTaskAiUploadDocPanel)
         val chooseDocButton = findViewById<com.google.android.material.button.MaterialButton>(R.id.addTaskAiChooseDocButton)
@@ -215,6 +215,7 @@ class AddTaskActivity : AppCompatActivity() {
             val difficulty = selectedDifficulty
             val requirements = additionalDetailsInput.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
             val selectedDoc = selectedDocUri
+            val selectedPhoto = selectedPhotoUri
 
             createButton.isEnabled = false
             cancelButton.isEnabled = false
@@ -263,6 +264,27 @@ class AddTaskActivity : AppCompatActivity() {
                             }
                         }
 
+                        val photoText = selectedPhoto?.let { uri ->
+                            when (val res = PhotoTextExtractor.extractText(this, uri)) {
+                                is PhotoTextExtractor.Result.Success -> res.text
+                                is PhotoTextExtractor.Result.Failure -> {
+                                    runOnUiThread {
+                                        val msg = "Could not read text from photo.\n${res.message}"
+                                        Log.w(logTag, msg)
+                                        if (!isFinishing && !isDestroyed) {
+                                            activeDialog?.dismiss()
+                                            activeDialog = MaterialAlertDialogBuilder(this)
+                                                .setTitle("Photo text skipped")
+                                                .setMessage(res.message)
+                                                .setPositiveButton(android.R.string.ok, null)
+                                                .show()
+                                        }
+                                    }
+                                    null
+                                }
+                            }
+                        }
+
                         val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
                             title = title,
@@ -271,6 +293,7 @@ class AddTaskActivity : AppCompatActivity() {
                             difficulty = difficulty,
                             requirements = requirements,
                             documentContent = documentContent,
+                            photoText = photoText,
                         )) {
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {

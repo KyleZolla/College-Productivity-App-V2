@@ -26,6 +26,7 @@ object SupabaseEdgeFunctionsApi {
         difficulty: String?,
         requirements: String?,
         documentContent: String?,
+        photoText: String?,
     ): RoadmapResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return RoadmapResult.Failure("Missing Supabase config.")
@@ -37,6 +38,7 @@ object SupabaseEdgeFunctionsApi {
             .put("difficulty", difficulty ?: JSONObject.NULL)
             .put("requirements", requirements ?: JSONObject.NULL)
             .put("documentContent", documentContent ?: JSONObject.NULL)
+            .put("photoText", photoText ?: JSONObject.NULL)
 
         val base = BuildConfig.SUPABASE_URL.trimEnd('/')
         val primary = callRoadmapFunction(base, PRIMARY_ROADMAP_FUNCTION_SLUG, accessToken, payload)
