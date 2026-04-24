@@ -2,6 +2,9 @@ package com.example.productivityapp
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
 data class RoadmapStep(
     val title: String,
@@ -75,6 +78,47 @@ data class RoadmapStep(
                 priority = priority,
                 completed = completed,
             )
+        }
+
+        /**
+         * Shifts parseable calendar dates in [recommendedDate] by [deltaDays].
+         * Unparseable values are left unchanged.
+         */
+        fun shiftRecommendedDates(steps: List<RoadmapStep>, deltaDays: Long): List<RoadmapStep> {
+            if (deltaDays == 0L) return steps
+            return steps.map { step ->
+                val parsed = parseRecommendedDate(step.recommendedDate) ?: return@map step
+                val shifted = parsed.plusDays(deltaDays)
+                step.copy(recommendedDate = shifted.format(DateTimeFormatter.ISO_LOCAL_DATE))
+            }
+        }
+
+        private fun parseRecommendedDate(raw: String): LocalDate? {
+            val s = raw.trim()
+            if (s.isEmpty()) return null
+
+            // Common formats from Edge Functions / UI.
+            val formatters = listOf(
+                DateTimeFormatter.ISO_LOCAL_DATE, // yyyy-MM-dd
+                DateTimeFormatter.ofPattern("M/d/yyyy"),
+                DateTimeFormatter.ofPattern("MM/dd/yyyy"),
+                DateTimeFormatter.ofPattern("MMM d, yyyy"),
+                DateTimeFormatter.ofPattern("MMMM d, yyyy"),
+            )
+            for (fmt in formatters) {
+                try {
+                    return LocalDate.parse(s, fmt)
+                } catch (_: DateTimeParseException) {
+                    // try next
+                }
+            }
+
+            // Last resort: try ISO-ish datetime strings.
+            return try {
+                TaskDueParsing.parseFlexible(s)?.toLocalDate()
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 }

@@ -22,6 +22,7 @@ import org.json.JSONArray
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.temporal.ChronoUnit
 import java.util.Calendar
 import java.util.concurrent.Executors
 
@@ -271,6 +272,7 @@ class TaskDetailActivity : AppCompatActivity() {
         }
         val target = draftDue
         if (target == savedDue) return
+        val previousDue = savedDue
 
         saveDueButton?.isEnabled = false
         editDueButton?.isEnabled = false
@@ -278,14 +280,48 @@ class TaskDetailActivity : AppCompatActivity() {
 
         networkExecutor.execute {
             when (val result = SupabaseTasksApi.updateTaskDueDate(token, taskId, target)) {
-                is SupabaseTasksApi.PatchDueResult.Success -> runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
-                    savedDue = result.dueDate
-                    draftDue = savedDue
-                    refreshDueLabel()
-                    editDueButton?.isEnabled = true
-                    saveDueButton?.text = getString(R.string.task_detail_save_due)
-                    Toast.makeText(this, R.string.task_detail_due_saved, Toast.LENGTH_SHORT).show()
+                is SupabaseTasksApi.PatchDueResult.Success -> {
+                    val newDue = result.dueDate
+                    val deltaDays = if (previousDue != null && newDue != null) {
+                        ChronoUnit.DAYS.between(previousDue.toLocalDate(), newDue.toLocalDate())
+                    } else {
+                        0L
+                    }
+
+                    var shiftedRoadmap: JSONArray? = null
+                    if (deltaDays != 0L && roadmapSteps.isNotEmpty()) {
+                        val shifted = RoadmapStep.shiftRecommendedDates(roadmapSteps, deltaDays)
+                        val candidate = RoadmapStep.toJsonArray(shifted)
+                        when (val roadmapPatch = SupabaseTasksApi.updateTaskRoadmap(token, taskId, candidate)) {
+                            is SupabaseTasksApi.PatchRoadmapResult.Success -> {
+                                shiftedRoadmap = candidate
+                            }
+                            is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
+                                if (isFinishing) return@runOnUiThread
+                                Toast.makeText(
+                                    this,
+                                    "Due date saved, but could not shift roadmap dates.\n${roadmapPatch.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        savedDue = newDue
+                        draftDue = savedDue
+                        refreshDueLabel()
+                        editDueButton?.isEnabled = true
+                        saveDueButton?.text = getString(R.string.task_detail_save_due)
+                        Toast.makeText(this, R.string.task_detail_due_saved, Toast.LENGTH_SHORT).show()
+
+                        if (shiftedRoadmap != null) {
+                            roadmapSteps = RoadmapStep.parseList(shiftedRoadmap).toMutableList()
+                            roadmapAdapter.submitList(roadmapSteps)
+                            refreshRoadmapProgress()
+                        }
+                    }
                 }
                 is SupabaseTasksApi.PatchDueResult.Failure -> runOnUiThread {
                     if (isFinishing) return@runOnUiThread
