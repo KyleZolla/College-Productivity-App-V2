@@ -57,4 +57,38 @@ object DueDateHumanLabel {
             }
         }
     }
+
+    /**
+     * Short "Due …" phrase for compact UI (no clock time), e.g. combined with hour estimates.
+     */
+    fun compactDuePhrase(context: Context, due: LocalDateTime?, today: LocalDate, status: TaskStatus? = null): String {
+        if (due == null) return context.getString(R.string.home_today_plan_due_none)
+        val now = LocalDateTime.now()
+        if (isOverdue(due, status, now)) {
+            return context.getString(R.string.home_today_plan_due_overdue)
+        }
+        val locale = Locale.getDefault()
+        val dueDay = due.toLocalDate()
+        val days = ChronoUnit.DAYS.between(today, dueDay)
+        return when {
+            days == 0L -> context.getString(R.string.home_today_plan_due_today)
+            days == 1L -> context.getString(R.string.home_today_plan_due_tomorrow)
+            days in 2L..6L ->
+                context.getString(
+                    R.string.home_today_plan_due_weekday,
+                    dueDay.dayOfWeek.getDisplayName(TextStyle.FULL, locale),
+                )
+            days in 7L..13L -> {
+                val short = dueDay.dayOfWeek.getDisplayName(TextStyle.SHORT_STANDALONE, locale).replace(".", "")
+                context.getString(R.string.home_today_plan_due_next_weekday, short)
+            }
+            else -> {
+                val pattern = if (dueDay.year == today.year) "MMM d" else "MMM d, yyyy"
+                context.getString(
+                    R.string.home_today_plan_due_calendar,
+                    dueDay.format(DateTimeFormatter.ofPattern(pattern, locale)),
+                )
+            }
+        }
+    }
 }

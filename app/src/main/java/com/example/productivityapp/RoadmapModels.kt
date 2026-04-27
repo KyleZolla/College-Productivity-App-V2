@@ -93,6 +93,10 @@ data class RoadmapStep(
             }
         }
 
+        /** Step [recommendedDate] as a calendar day, if parseable. */
+        fun recommendedLocalDate(step: RoadmapStep): LocalDate? =
+            parseRecommendedDate(step.recommendedDate)
+
         private fun parseRecommendedDate(raw: String): LocalDate? {
             val s = raw.trim()
             if (s.isEmpty()) return null

@@ -1,6 +1,7 @@
 package com.example.productivityapp
 
 import android.content.Intent
+import android.graphics.Paint
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -18,6 +19,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import java.time.LocalDate
@@ -25,6 +27,9 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.comparisons.compareBy
+import kotlin.comparisons.nullsLast
+import kotlin.math.roundToInt
 
 class HomeActivity : AppCompatActivity() {
 
@@ -52,7 +57,13 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var homeDateLine: TextView
     private lateinit var homeGreetingLine: TextView
+    private lateinit var homeTodayPlanSection: LinearLayout
+    private lateinit var homeTodayPlanEmpty: TextView
+    private lateinit var homeTodayPlanGroups: LinearLayout
     private lateinit var homeUpcomingLoading: ProgressBar
+
+    private var homeTasksSnapshot: List<SupabaseTasksApi.TaskRow> = emptyList()
+    private var homeRoadmapPatchInFlight = false
     private lateinit var homeUpcomingEmpty: TextView
     private lateinit var homeUpcomingCards: LinearLayout
     private lateinit var homeViewAllTasks: TextView
@@ -96,6 +107,9 @@ class HomeActivity : AppCompatActivity() {
 
         homeDateLine = findViewById(R.id.homeDateLine)
         homeGreetingLine = findViewById(R.id.homeGreetingLine)
+        homeTodayPlanSection = findViewById(R.id.homeTodayPlanSection)
+        homeTodayPlanEmpty = findViewById(R.id.homeTodayPlanEmpty)
+        homeTodayPlanGroups = findViewById(R.id.homeTodayPlanGroups)
         homeUpcomingLoading = findViewById(R.id.homeUpcomingLoading)
         homeUpcomingEmpty = findViewById(R.id.homeUpcomingEmpty)
         homeUpcomingCards = findViewById(R.id.homeUpcomingCards)
@@ -246,6 +260,7 @@ class HomeActivity : AppCompatActivity() {
             homeUpcomingLoading.visibility = View.GONE
             homeUpcomingCards.removeAllViews()
             homeUpcomingCards.visibility = View.GONE
+            homeTodayPlanSection.visibility = View.GONE
             homeUpcomingEmpty.text = getString(R.string.error_task_not_signed_in)
             homeUpcomingEmpty.visibility = View.VISIBLE
             return
@@ -255,6 +270,7 @@ class HomeActivity : AppCompatActivity() {
             homeUpcomingLoading.visibility = View.VISIBLE
             homeUpcomingEmpty.visibility = View.GONE
             homeUpcomingCards.visibility = View.GONE
+            homeTodayPlanSection.visibility = View.GONE
         }
 
         networkExecutor.execute {
@@ -262,10 +278,12 @@ class HomeActivity : AppCompatActivity() {
                 is SupabaseTasksApi.ListResult.Success -> runOnUiThread {
                     if (showLoading) homeUpcomingLoading.visibility = View.GONE
                     bindHomePreviewCards(result.tasks.take(3))
+                    bindHomeTodayPlan(result.tasks)
                 }
                 is SupabaseTasksApi.ListResult.Failure -> runOnUiThread {
                     if (showLoading) homeUpcomingLoading.visibility = View.GONE
                     if (showLoading) {
+                        homeTodayPlanSection.visibility = View.GONE
                         homeUpcomingCards.removeAllViews()
                         homeUpcomingCards.visibility = View.GONE
                         homeUpcomingEmpty.text =
@@ -276,6 +294,231 @@ class HomeActivity : AppCompatActivity() {
                             getString(R.string.home_upcoming_load_failed) + "\n" + result.message,
                             Toast.LENGTH_LONG
                         ).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private data class HomeTodayPlanEntry(
+        val task: SupabaseTasksApi.TaskRow,
+        val step: RoadmapStep,
+        val stepIndex: Int,
+        val recommendedOn: LocalDate,
+    )
+
+    private fun collectTodayPlanEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<HomeTodayPlanEntry> {
+        val out = ArrayList<HomeTodayPlanEntry>()
+        for (task in tasks) {
+            val steps = RoadmapStep.parseList(task.roadmap)
+            steps.forEachIndexed { index, step ->
+                val on = RoadmapStep.recommendedLocalDate(step) ?: return@forEachIndexed
+                if (on.isAfter(today)) return@forEachIndexed
+                out.add(
+                    HomeTodayPlanEntry(
+                        task = task,
+                        step = step,
+                        stepIndex = index,
+                        recommendedOn = on,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    private fun sortTodayPlanEntries(entries: List<HomeTodayPlanEntry>, today: LocalDate): List<HomeTodayPlanEntry> {
+        val (past, dueToday) = entries.partition { it.recommendedOn.isBefore(today) }
+        val sortedPast = past.sortedWith(compareBy { it.recommendedOn })
+        val sortedToday = dueToday.sortedWith(
+            compareBy<HomeTodayPlanEntry> { it.step.priority }
+                .thenByDescending { it.step.estimatedHours ?: -1.0 }
+                .thenBy(nullsLast()) { it.task.dueDate },
+        )
+        return sortedPast + sortedToday
+    }
+
+    private fun applyTodayPlanStepCompletedStyle(
+        title: TextView,
+        meta: TextView,
+        check: MaterialCheckBox,
+        completed: Boolean,
+    ) {
+        val dim = if (completed) 0.5f else 1f
+        title.alpha = dim
+        meta.alpha = dim
+        check.alpha = dim
+        title.paintFlags = if (completed) {
+            title.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+        } else {
+            title.paintFlags and Paint.STRIKE_THRU_TEXT_FLAG.inv()
+        }
+    }
+
+    private fun deriveStatusFromSteps(steps: List<RoadmapStep>): TaskStatus {
+        if (steps.isEmpty()) return TaskStatus.NOT_STARTED
+        val completed = steps.count { it.completed }
+        return when {
+            completed <= 0 -> TaskStatus.NOT_STARTED
+            completed >= steps.size -> TaskStatus.COMPLETE
+            else -> TaskStatus.IN_PROGRESS
+        }
+    }
+
+    private fun formatTodayPlanStepMeta(step: RoadmapStep): String {
+        val timePart = when (val h = step.estimatedHours) {
+            null -> getString(R.string.home_today_plan_step_time_unknown)
+            else -> when {
+                h < 1.0 / 60.0 -> getString(R.string.home_today_plan_step_time_minutes, 1)
+                h < 1.0 -> getString(
+                    R.string.home_today_plan_step_time_minutes,
+                    (h * 60.0).roundToInt().coerceAtLeast(1),
+                )
+                else -> getString(R.string.home_today_plan_step_time_hours, h)
+            }
+        }
+        val priorityPart = when (step.priority) {
+            RoadmapStep.Priority.HIGH -> getString(R.string.home_today_plan_priority_high)
+            RoadmapStep.Priority.MEDIUM -> getString(R.string.home_today_plan_priority_medium)
+            RoadmapStep.Priority.LOW -> getString(R.string.home_today_plan_priority_low)
+        }
+        return getString(R.string.home_today_plan_step_meta, timePart, priorityPart)
+    }
+
+    private fun bindHomeTodayPlan(allActiveTasks: List<SupabaseTasksApi.TaskRow>) {
+        homeTasksSnapshot = allActiveTasks
+        homeTodayPlanSection.visibility = View.VISIBLE
+        val today = LocalDate.now()
+        val entries = collectTodayPlanEntries(allActiveTasks, today)
+        val hasIncomplete = entries.any { !it.step.completed }
+        if (!hasIncomplete) {
+            homeTodayPlanEmpty.visibility = View.VISIBLE
+            homeTodayPlanGroups.visibility = View.GONE
+            homeTodayPlanGroups.removeAllViews()
+            return
+        }
+        homeTodayPlanEmpty.visibility = View.GONE
+        homeTodayPlanGroups.visibility = View.VISIBLE
+        homeTodayPlanGroups.removeAllViews()
+        val sorted = sortTodayPlanEntries(entries, today)
+        val inflater = LayoutInflater.from(this)
+        var lastTaskId: String? = null
+        var isFirstHeader = true
+        val density = resources.displayMetrics.density
+        val headerTopFirst = (4 * density).toInt()
+        val headerTopRest = (12 * density).toInt()
+        sorted.forEach { entry ->
+            if (entry.task.id != lastTaskId) {
+                val header = inflater.inflate(R.layout.item_home_today_plan_task_header, homeTodayPlanGroups, false)
+                val top = if (isFirstHeader) headerTopFirst else headerTopRest
+                isFirstHeader = false
+                header.setPadding(header.paddingLeft, top, header.paddingRight, header.paddingBottom)
+                header.findViewById<TextView>(R.id.homeTodayPlanTaskHeader).text = entry.task.title
+                header.setOnClickListener { openTaskDetail(entry.task) }
+                homeTodayPlanGroups.addView(header)
+                lastTaskId = entry.task.id
+            }
+            val row = inflater.inflate(R.layout.item_home_today_plan_step, homeTodayPlanGroups, false)
+            val check = row.findViewById<MaterialCheckBox>(R.id.homeTodayPlanStepCheck)
+            val title = row.findViewById<TextView>(R.id.homeTodayPlanStepTitle)
+            val meta = row.findViewById<TextView>(R.id.homeTodayPlanStepMeta)
+            title.text = entry.step.title
+            meta.text = formatTodayPlanStepMeta(entry.step)
+            check.setOnCheckedChangeListener(null)
+            check.isChecked = entry.step.completed
+            check.setOnCheckedChangeListener { _, checked ->
+                onTodayPlanStepToggled(entry.task.id, entry.stepIndex, checked)
+            }
+            applyTodayPlanStepCompletedStyle(title, meta, check, entry.step.completed)
+            check.isEnabled = !homeRoadmapPatchInFlight
+            val stepRow = row.findViewById<View>(R.id.homeTodayPlanStepRow)
+            stepRow.isClickable = !homeRoadmapPatchInFlight
+            stepRow.setOnClickListener {
+                if (!homeRoadmapPatchInFlight) check.performClick()
+            }
+            homeTodayPlanGroups.addView(row)
+        }
+    }
+
+    private fun onTodayPlanStepToggled(taskId: String, stepIndex: Int, checked: Boolean) {
+        if (homeRoadmapPatchInFlight) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        val task = homeTasksSnapshot.find { it.id == taskId } ?: return
+        val steps = RoadmapStep.parseList(task.roadmap).toMutableList()
+        if (stepIndex !in steps.indices) return
+        if (steps[stepIndex].completed == checked) return
+        homeRoadmapPatchInFlight = true
+        steps[stepIndex] = steps[stepIndex].copy(completed = checked)
+        val previousStatus = task.status
+        val derived = deriveStatusFromSteps(steps)
+        val newRoadmap = RoadmapStep.toJsonArray(steps)
+        homeTasksSnapshot = homeTasksSnapshot.map { row ->
+            if (row.id == taskId) row.copy(roadmap = newRoadmap, status = derived) else row
+        }
+        bindHomeTodayPlan(homeTasksSnapshot)
+        bindHomePreviewCards(homeTasksSnapshot.take(3))
+        persistTodayPlanRoadmap(token, taskId, steps, derived, previousStatus)
+    }
+
+    private fun persistTodayPlanRoadmap(
+        token: String,
+        taskId: String,
+        steps: List<RoadmapStep>,
+        derived: TaskStatus,
+        previousStatus: TaskStatus,
+    ) {
+        val payload = RoadmapStep.toJsonArray(steps)
+        networkExecutor.execute {
+            when (val road = SupabaseTasksApi.updateTaskRoadmap(token, taskId, payload)) {
+                is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
+                    homeRoadmapPatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    Toast.makeText(
+                        this,
+                        getString(R.string.home_today_plan_save_failed, road.message),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    loadHomeUpcoming(showLoading = false)
+                }
+                is SupabaseTasksApi.PatchRoadmapResult.Success -> {
+                    if (derived != previousStatus) {
+                        when (val st = SupabaseTasksApi.updateTaskStatus(token, taskId, derived)) {
+                            is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
+                                homeRoadmapPatchInFlight = false
+                                if (isFinishing) return@runOnUiThread
+                                Toast.makeText(
+                                    this,
+                                    getString(R.string.error_task_status_update_failed) + "\n" + st.message,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                loadHomeUpcoming(showLoading = false)
+                            }
+                            is SupabaseTasksApi.PatchResult.Success -> runOnUiThread {
+                                homeRoadmapPatchInFlight = false
+                                if (isFinishing) return@runOnUiThread
+                                homeTasksSnapshot = homeTasksSnapshot.map { row ->
+                                    if (row.id == taskId) row.copy(status = st.status) else row
+                                }
+                                bindHomeTodayPlan(homeTasksSnapshot)
+                                bindHomePreviewCards(homeTasksSnapshot.take(3))
+                                if (currentTab == Tab.Tasks) {
+                                    loadTasks(showLoading = false)
+                                }
+                            }
+                        }
+                    } else {
+                        runOnUiThread {
+                            homeRoadmapPatchInFlight = false
+                            if (isFinishing) return@runOnUiThread
+                            bindHomeTodayPlan(homeTasksSnapshot)
+                            bindHomePreviewCards(homeTasksSnapshot.take(3))
+                            if (currentTab == Tab.Tasks) {
+                                loadTasks(showLoading = false)
+                            }
+                        }
                     }
                 }
             }
