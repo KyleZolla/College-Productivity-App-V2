@@ -14,6 +14,11 @@ enum class TaskListFilter {
     ACTIVE,
     /** Only status Complete. */
     COMPLETED,
+    /**
+     * Completed tasks that still have roadmap JSON (non-null).
+     * Used with [ACTIVE] on home so “review completed” days still list fully-done tasks.
+     */
+    COMPLETED_WITH_ROADMAP,
 }
 
 /**
@@ -77,6 +82,8 @@ object SupabaseTasksApi {
             val statusParam = when (filter) {
                 TaskListFilter.ACTIVE -> "status=neq.${enc(TaskStatus.COMPLETE.apiValue)}"
                 TaskListFilter.COMPLETED -> "status=eq.${enc(TaskStatus.COMPLETE.apiValue)}"
+                TaskListFilter.COMPLETED_WITH_ROADMAP ->
+                    "status=eq.${enc(TaskStatus.COMPLETE.apiValue)}&roadmap=not.is.null"
             }
             val query = "select=id,title,dueDate,status,roadmap&$statusParam&order=dueDate.asc.nullslast"
             val url = URL("$base/rest/v1/tasks?$query")

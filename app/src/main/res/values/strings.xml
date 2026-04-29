@@ -42,6 +42,15 @@
     <string name="home_coming_up_label">Coming up</string>
     <string name="home_today_plan_label">Today\'s plan</string>
     <string name="home_today_plan_empty_ahead">Nothing scheduled for today — you\'re ahead!</string>
+    <string name="home_today_plan_progression_day_done">You finished every step planned for %1$s.</string>
+    <string name="home_today_plan_see_full">See full plan</string>
+    <string name="home_today_plan_show_less">Show less</string>
+    <string name="home_today_plan_view_completed">View what you completed</string>
+    <string name="home_today_plan_view_completed_ahead">See what you finished early</string>
+    <string name="home_get_ahead_label">Get ahead</string>
+    <string name="home_get_ahead_next_day">Next: %1$s</string>
+    <string name="home_today_plan_steps_summary">%1$d of %2$d steps done today</string>
+    <string name="home_today_plan_hours_summary">%1$s of %2$s hrs done</string>
     <string name="home_today_plan_save_failed">Couldn\'t save progress.\n%1$s</string>
     <string name="home_today_plan_due_today">Due today</string>
     <string name="home_today_plan_due_tomorrow">Due tomorrow</string>

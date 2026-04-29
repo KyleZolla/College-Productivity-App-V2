@@ -84,6 +84,43 @@
                             android:orientation="vertical"
                             android:padding="20dp">
 
+                            <LinearLayout
+                                android:id="@+id/homeTodayPlanProgressBlock"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginBottom="12dp"
+                                android:orientation="vertical"
+                                android:visibility="gone"
+                                tools:visibility="visible">
+
+                                <TextView
+                                    android:id="@+id/homeTodayPlanStepsSummary"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    tools:text="3 of 7 steps done today" />
+
+                                <TextView
+                                    android:id="@+id/homeTodayPlanHoursSummary"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    tools:text="2.5 of 6 hrs done" />
+
+                                <ProgressBar
+                                    android:id="@+id/homeTodayPlanHoursProgress"
+                                    style="?android:attr/progressBarStyleHorizontal"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="8dp"
+                                    android:layout_marginTop="8dp"
+                                    android:max="1000"
+                                    android:progress="0"
+                                    tools:progress="350" />
+                            </LinearLayout>
+
                             <TextView
                                 android:id="@+id/homeTodayPlanEmpty"
                                 android:layout_width="match_parent"
@@ -98,9 +135,70 @@
                                 android:id="@+id/homeTodayPlanGroups"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
+                                android:animateLayoutChanges="true"
                                 android:orientation="vertical"
                                 android:visibility="gone"
                                 tools:visibility="visible" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/homeTodayPlanToggle"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:minHeight="0dp"
+                                android:paddingStart="0dp"
+                                android:paddingEnd="0dp"
+                                android:text="@string/home_today_plan_see_full"
+                                android:visibility="gone"
+                                tools:visibility="visible" />
+
+                            <LinearLayout
+                                android:id="@+id/homeTodayPlanCompletedByDayHost"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                android:animateLayoutChanges="true"
+                                android:orientation="vertical"
+                                android:visibility="gone"
+                                tools:visibility="visible" />
+
+                            <LinearLayout
+                                android:id="@+id/homeGetAheadSection"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="24dp"
+                                android:orientation="vertical"
+                                android:visibility="gone"
+                                tools:visibility="visible">
+
+                                <TextView
+                                    android:id="@+id/homeGetAheadLabel"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:letterSpacing="0.08"
+                                    android:text="@string/home_get_ahead_label"
+                                    android:textAllCaps="true"
+                                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                                <TextView
+                                    android:id="@+id/homeGetAheadDateLine"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    tools:text="Next: Wednesday, April 29" />
+
+                                <LinearLayout
+                                    android:id="@+id/homeGetAheadGroups"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:animateLayoutChanges="true"
+                                    android:orientation="vertical" />
+                            </LinearLayout>
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
