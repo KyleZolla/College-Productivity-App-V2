@@ -63,11 +63,17 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeTodayPlanHoursSummary: TextView
     private lateinit var homeTodayPlanHoursProgress: ProgressBar
     private lateinit var homeTodayPlanEmpty: TextView
+    private lateinit var homeTodayPlanCompletedTodayHost: LinearLayout
+    private lateinit var homeTodayPlanFutureReviewBeforeFocusHost: LinearLayout
     private lateinit var homeTodayPlanCompletedByDayHost: LinearLayout
     private lateinit var homeTodayPlanGroups: LinearLayout
     private lateinit var homeTodayPlanToggle: MaterialButton
     private lateinit var homeGetAheadSection: LinearLayout
     private lateinit var homeGetAheadDateLine: TextView
+    private lateinit var homeGetAheadProgressBlock: LinearLayout
+    private lateinit var homeGetAheadStepsSummary: TextView
+    private lateinit var homeGetAheadHoursSummary: TextView
+    private lateinit var homeGetAheadHoursProgress: ProgressBar
     private lateinit var homeGetAheadGroups: LinearLayout
     private lateinit var homeUpcomingLoading: ProgressBar
 
@@ -127,6 +133,9 @@ class HomeActivity : AppCompatActivity() {
         homeTodayPlanHoursSummary = findViewById(R.id.homeTodayPlanHoursSummary)
         homeTodayPlanHoursProgress = findViewById(R.id.homeTodayPlanHoursProgress)
         homeTodayPlanEmpty = findViewById(R.id.homeTodayPlanEmpty)
+        homeTodayPlanCompletedTodayHost = findViewById(R.id.homeTodayPlanCompletedTodayHost)
+        homeTodayPlanFutureReviewBeforeFocusHost =
+            findViewById(R.id.homeTodayPlanFutureReviewBeforeFocusHost)
         homeTodayPlanCompletedByDayHost = findViewById(R.id.homeTodayPlanCompletedByDayHost)
         homeTodayPlanGroups = findViewById(R.id.homeTodayPlanGroups)
         homeTodayPlanToggle = findViewById(R.id.homeTodayPlanToggle)
@@ -136,6 +145,10 @@ class HomeActivity : AppCompatActivity() {
         }
         homeGetAheadSection = findViewById(R.id.homeGetAheadSection)
         homeGetAheadDateLine = findViewById(R.id.homeGetAheadDateLine)
+        homeGetAheadProgressBlock = findViewById(R.id.homeGetAheadProgressBlock)
+        homeGetAheadStepsSummary = findViewById(R.id.homeGetAheadStepsSummary)
+        homeGetAheadHoursSummary = findViewById(R.id.homeGetAheadHoursSummary)
+        homeGetAheadHoursProgress = findViewById(R.id.homeGetAheadHoursProgress)
         homeGetAheadGroups = findViewById(R.id.homeGetAheadGroups)
         homeUpcomingLoading = findViewById(R.id.homeUpcomingLoading)
         homeUpcomingEmpty = findViewById(R.id.homeUpcomingEmpty)
@@ -392,19 +405,21 @@ class HomeActivity : AppCompatActivity() {
 
     private fun sortTodayPlanEntries(entries: List<HomeTodayPlanEntry>, today: LocalDate): List<HomeTodayPlanEntry> {
         val (past, dueToday) = entries.partition { it.recommendedOn.isBefore(today) }
-        val sortedPast = past.sortedWith(compareBy { it.recommendedOn })
-        val sortedToday = dueToday.sortedWith(
-            compareBy<HomeTodayPlanEntry> { it.step.priority }
-                .thenByDescending { it.step.estimatedHours ?: -1.0 }
-                .thenBy(nullsLast()) { it.task.dueDate },
-        )
+        val sortedPast = past
+            .groupBy { it.recommendedOn }
+            .toSortedMap()
+            .values
+            .flatMap { dayEntries ->
+                sortByTaskRankThenRoadmap(dayEntries, todayTaskRankComparator())
+            }
+        val sortedToday = sortByTaskRankThenRoadmap(dueToday, todayTaskRankComparator())
         return sortedPast + sortedToday
     }
 
     /**
-     * Ordered calendar days for “review completed” when today's window is fully done:
-     * today first, then future days that are fully cleared (excluding get-ahead focus day
-     * while that section is visible).
+     * Ordered future-day review buckets (excluding today's bucket): include days where at least one
+     * step is completed so "started early" work stays visible; exclude the focused Get ahead day
+     * while that section is visible to avoid duplicate presentation.
      */
     private fun buildCompletedReviewDays(
         todayEntries: List<HomeTodayPlanEntry>,
@@ -414,33 +429,16 @@ class HomeActivity : AppCompatActivity() {
         focusDay: LocalDate?,
     ): List<Pair<LocalDate, List<HomeTodayPlanEntry>>> {
         val out = ArrayList<Pair<LocalDate, List<HomeTodayPlanEntry>>>()
-        todayEntries.groupBy { it.recommendedOn }.toSortedMap().forEach { (day, list) ->
-            if (list.isNotEmpty()) {
-                out.add(day to sortEntriesForReviewDay(day, list, today))
-            }
+        if (todayEntries.isNotEmpty()) {
+            out.add(today to sortTodayPlanEntries(todayEntries, today))
         }
         futureEntries.groupBy { it.recommendedOn }.toSortedMap().forEach { (day, list) ->
-            if (list.isEmpty() || !list.all { it.step.completed }) return@forEach
+            // Keep a future day visible once it has any completed work, even if not fully done yet.
+            if (list.isEmpty() || list.none { it.step.completed }) return@forEach
             if (getAheadVisible && focusDay != null && day == focusDay) return@forEach
             out.add(day to sortGetAheadDayEntries(list))
         }
         return out
-    }
-
-    private fun sortEntriesForReviewDay(
-        day: LocalDate,
-        list: List<HomeTodayPlanEntry>,
-        today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
-        return if (day.isBefore(today)) {
-            sortGetAheadDayEntries(list)
-        } else {
-            list.sortedWith(
-                compareBy<HomeTodayPlanEntry> { it.step.priority }
-                    .thenByDescending { it.step.estimatedHours ?: -1.0 }
-                    .thenBy(nullsLast()) { it.task.dueDate },
-            )
-        }
     }
 
     private fun formatTodayPlanCollapsedEmptyText(): String =
@@ -455,54 +453,102 @@ class HomeActivity : AppCompatActivity() {
     private fun bindCompletedReviewByDay(
         reviewDays: List<Pair<LocalDate, List<HomeTodayPlanEntry>>>,
         today: LocalDate,
+        getAheadVisible: Boolean,
+        focusDay: LocalDate?,
     ) {
+        homeTodayPlanCompletedTodayHost.removeAllViews()
+        homeTodayPlanFutureReviewBeforeFocusHost.removeAllViews()
         homeTodayPlanCompletedByDayHost.removeAllViews()
         if (reviewDays.isEmpty()) {
+            homeTodayPlanCompletedTodayHost.visibility = View.GONE
+            homeTodayPlanFutureReviewBeforeFocusHost.visibility = View.GONE
             homeTodayPlanCompletedByDayHost.visibility = View.GONE
             return
         }
-        homeTodayPlanCompletedByDayHost.visibility = View.VISIBLE
+        var hasTodayBlocks = false
+        var hasFutureBeforeFocusBlocks = false
+        var hasFutureBlocks = false
         val inflater = LayoutInflater.from(this)
         val dateFmt = DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.getDefault())
         for ((day, list) in reviewDays) {
-            val block = inflater.inflate(R.layout.item_home_completed_day_review, homeTodayPlanCompletedByDayHost, false)
+            val targetHost = when {
+                day == today -> homeTodayPlanCompletedTodayHost
+                getAheadVisible && focusDay != null && day.isBefore(focusDay) ->
+                    homeTodayPlanFutureReviewBeforeFocusHost
+                else -> homeTodayPlanCompletedByDayHost
+            }
+            val block = inflater.inflate(R.layout.item_home_completed_day_review, targetHost, false)
             val title = block.findViewById<TextView>(R.id.homeCompletedDayTitle)
             val subtitle = block.findViewById<TextView>(R.id.homeCompletedDaySubtitle)
+            val progressBlock = block.findViewById<LinearLayout>(R.id.homeCompletedDayProgressBlock)
+            val stepsSummary = block.findViewById<TextView>(R.id.homeCompletedDayStepsSummary)
+            val hoursSummary = block.findViewById<TextView>(R.id.homeCompletedDayHoursSummary)
+            val hoursProgress = block.findViewById<ProgressBar>(R.id.homeCompletedDayHoursProgress)
             val toggle = block.findViewById<MaterialButton>(R.id.homeCompletedDayToggle)
             val stepsHost = block.findViewById<LinearLayout>(R.id.homeCompletedDaySteps)
             title.text = day.format(dateFmt)
-            if (day.isAfter(today)) {
+            val allDoneOnDay = list.all { it.step.completed }
+            val partiallyDoneFutureDay = day.isAfter(today) && !allDoneOnDay
+            if (day.isAfter(today) && allDoneOnDay) {
                 subtitle.visibility = View.VISIBLE
                 subtitle.text = getString(R.string.home_today_plan_progression_day_done, day.format(dateFmt))
             } else {
                 subtitle.visibility = View.GONE
             }
+            if (day.isAfter(today)) {
+                progressBlock.visibility = View.VISIBLE
+                bindPlanProgress(
+                    entries = list,
+                    stepsSummary = stepsSummary,
+                    hoursSummary = hoursSummary,
+                    hoursProgress = hoursProgress,
+                    stepsSummaryRes = R.string.home_plan_steps_summary,
+                )
+            } else {
+                progressBlock.visibility = View.GONE
+            }
             val dayKey = day.toString()
             val expanded = dayKey in homeCompletedReviewDaysExpanded
-            toggle.text = getString(
-                when {
-                    expanded -> R.string.home_today_plan_show_less
-                    day.isAfter(today) -> R.string.home_today_plan_view_completed_ahead
-                    else -> R.string.home_today_plan_view_completed
-                },
-            )
-            if (expanded) {
+            if (partiallyDoneFutureDay) {
+                toggle.visibility = View.GONE
                 stepsHost.visibility = View.VISIBLE
                 bindPlanStepRows(stepsHost, list)
             } else {
-                stepsHost.visibility = View.GONE
-                stepsHost.removeAllViews()
-            }
-            toggle.setOnClickListener {
-                if (dayKey in homeCompletedReviewDaysExpanded) {
-                    homeCompletedReviewDaysExpanded.remove(dayKey)
+                toggle.visibility = View.VISIBLE
+                toggle.text = getString(
+                    when {
+                        expanded -> R.string.home_today_plan_show_less
+                        day.isAfter(today) && allDoneOnDay -> R.string.home_today_plan_view_completed_ahead
+                        else -> R.string.home_today_plan_view_completed
+                    },
+                )
+                if (expanded) {
+                    stepsHost.visibility = View.VISIBLE
+                    bindPlanStepRows(stepsHost, list)
                 } else {
-                    homeCompletedReviewDaysExpanded.add(dayKey)
+                    stepsHost.visibility = View.GONE
+                    stepsHost.removeAllViews()
                 }
-                bindHomeTodayPlan(homeTasksSnapshot)
+                toggle.setOnClickListener {
+                    if (dayKey in homeCompletedReviewDaysExpanded) {
+                        homeCompletedReviewDaysExpanded.remove(dayKey)
+                    } else {
+                        homeCompletedReviewDaysExpanded.add(dayKey)
+                    }
+                    bindHomeTodayPlan(homeTasksSnapshot)
+                }
             }
-            homeTodayPlanCompletedByDayHost.addView(block)
+            targetHost.addView(block)
+            when (targetHost) {
+                homeTodayPlanCompletedTodayHost -> hasTodayBlocks = true
+                homeTodayPlanFutureReviewBeforeFocusHost -> hasFutureBeforeFocusBlocks = true
+                else -> hasFutureBlocks = true
+            }
         }
+        homeTodayPlanCompletedTodayHost.visibility = if (hasTodayBlocks) View.VISIBLE else View.GONE
+        homeTodayPlanFutureReviewBeforeFocusHost.visibility =
+            if (hasFutureBeforeFocusBlocks) View.VISIBLE else View.GONE
+        homeTodayPlanCompletedByDayHost.visibility = if (hasFutureBlocks) View.VISIBLE else View.GONE
     }
 
     private fun todayPlanEntryKey(entry: HomeTodayPlanEntry): String =
@@ -544,24 +590,70 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun getAheadDayComparator(): Comparator<HomeTodayPlanEntry> =
+    private fun todayTaskRankComparator(): Comparator<HomeTodayPlanEntry> =
         compareBy<HomeTodayPlanEntry> { it.step.priority }
             .thenByDescending { it.step.estimatedHours ?: -1.0 }
             .thenBy(nullsLast()) { it.task.dueDate }
 
-    private fun sortGetAheadDayEntries(dayEntries: List<HomeTodayPlanEntry>): List<HomeTodayPlanEntry> {
-        val (taskOverdue, rest) = dayEntries.partition {
-            DueDateHumanLabel.isOverdue(it.task.dueDate, it.task.status)
-        }
-        val comp = getAheadDayComparator()
-        return taskOverdue.sortedWith(comp) + rest.sortedWith(comp)
+    private fun taskLeadEntry(taskEntries: List<HomeTodayPlanEntry>): HomeTodayPlanEntry =
+        taskEntries.filter { !it.step.completed }.minByOrNull { it.stepIndex }
+            ?: taskEntries.minBy { it.stepIndex }
+
+    /**
+     * Rank tasks first, then keep each task's roadmap sequence (`stepIndex`) intact.
+     */
+    private fun sortByTaskRankThenRoadmap(
+        entries: List<HomeTodayPlanEntry>,
+        taskRankComparator: Comparator<HomeTodayPlanEntry>,
+    ): List<HomeTodayPlanEntry> {
+        if (entries.isEmpty()) return emptyList()
+        val groups = entries.groupBy { it.task.id }.values
+        val sortedGroups = groups.sortedWith(
+            Comparator<List<HomeTodayPlanEntry>> { a, b ->
+                val leadA = taskLeadEntry(a)
+                val leadB = taskLeadEntry(b)
+                val ranked = taskRankComparator.compare(leadA, leadB)
+                if (ranked != 0) ranked else leadA.task.id.compareTo(leadB.task.id)
+            },
+        )
+        return sortedGroups.flatMap { group -> group.sortedBy { it.stepIndex } }
     }
 
-    private fun resolveGetAheadFocusDate(futureEntries: List<HomeTodayPlanEntry>): LocalDate? {
-        val incompleteDays = futureEntries.filter { !it.step.completed }
-            .map { it.recommendedOn }
-            .distinct()
-            .sorted()
+    private fun sortGetAheadDayEntries(dayEntries: List<HomeTodayPlanEntry>): List<HomeTodayPlanEntry> {
+        if (dayEntries.isEmpty()) return emptyList()
+        val byTask = dayEntries.groupBy { it.task.id }.values
+        val taskComparator = Comparator<List<HomeTodayPlanEntry>> { a, b ->
+            val leadA = taskLeadEntry(a)
+            val leadB = taskLeadEntry(b)
+            val overdueA = DueDateHumanLabel.isOverdue(leadA.task.dueDate, leadA.task.status)
+            val overdueB = DueDateHumanLabel.isOverdue(leadB.task.dueDate, leadB.task.status)
+            when {
+                overdueA && !overdueB -> -1
+                !overdueA && overdueB -> 1
+                else -> {
+                    val ranked = todayTaskRankComparator().compare(leadA, leadB)
+                    if (ranked != 0) ranked else leadA.task.id.compareTo(leadB.task.id)
+                }
+            }
+        }
+        return byTask
+            .sortedWith(taskComparator)
+            .flatMap { group -> group.sortedBy { it.stepIndex } }
+    }
+
+    private fun resolveGetAheadFocusDate(
+        futureEntries: List<HomeTodayPlanEntry>,
+        requireStartedOnFocusDay: Boolean,
+    ): LocalDate? {
+        val incompleteDays = futureEntries.groupBy { it.recommendedOn }
+            .toSortedMap()
+            .entries
+            .mapNotNull { (day, list) ->
+                val hasIncomplete = list.any { !it.step.completed }
+                if (!hasIncomplete) return@mapNotNull null
+                if (requireStartedOnFocusDay && list.none { it.step.completed }) return@mapNotNull null
+                day
+            }
         if (incompleteDays.isNotEmpty()) {
             // Earliest calendar day with any incomplete step (e.g. after unchecking “done early” work).
             return incompleteDays.first()
@@ -592,19 +684,28 @@ class HomeActivity : AppCompatActivity() {
     }
 
     /** @return true if the Get ahead block is visible after binding. */
-    private fun bindGetAheadSection(allActiveTasks: List<SupabaseTasksApi.TaskRow>, today: LocalDate): Boolean {
+    private fun bindGetAheadSection(
+        allActiveTasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+        requireStartedOnFocusDay: Boolean = false,
+    ): Boolean {
         var iterations = 0
         while (iterations++ < 400) {
             val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
             pruneGetAheadPinnedKeys(futureEntries)
             if (futureEntries.isEmpty()) {
                 homeGetAheadSection.visibility = View.GONE
+                homeGetAheadProgressBlock.visibility = View.GONE
                 homeGetAheadGroups.removeAllViews()
                 homeGetAheadFocusDate = null
                 return false
             }
-            val focus = resolveGetAheadFocusDate(futureEntries) ?: run {
+            val focus = resolveGetAheadFocusDate(
+                futureEntries = futureEntries,
+                requireStartedOnFocusDay = requireStartedOnFocusDay,
+            ) ?: run {
                 homeGetAheadSection.visibility = View.GONE
+                homeGetAheadProgressBlock.visibility = View.GONE
                 homeGetAheadGroups.removeAllViews()
                 homeGetAheadFocusDate = null
                 return false
@@ -627,11 +728,20 @@ class HomeActivity : AppCompatActivity() {
                 R.string.home_get_ahead_next_day,
                 focus.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.getDefault())),
             )
+            homeGetAheadProgressBlock.visibility = View.VISIBLE
+            bindPlanProgress(
+                entries = dayEntries,
+                stepsSummary = homeGetAheadStepsSummary,
+                hoursSummary = homeGetAheadHoursSummary,
+                hoursProgress = homeGetAheadHoursProgress,
+                stepsSummaryRes = R.string.home_plan_steps_summary,
+            )
             val visible = buildGetAheadCollapsedVisible(dayEntries)
             bindPlanStepRows(homeGetAheadGroups, visible)
             return true
         }
         homeGetAheadSection.visibility = View.GONE
+        homeGetAheadProgressBlock.visibility = View.GONE
         homeGetAheadGroups.removeAllViews()
         return false
     }
@@ -652,18 +762,33 @@ class HomeActivity : AppCompatActivity() {
             return
         }
         homeTodayPlanProgressBlock.visibility = View.VISIBLE
-        val totalSteps = todayEntries.size
-        val doneSteps = todayEntries.count { it.step.completed }
-        homeTodayPlanStepsSummary.text =
-            getString(R.string.home_today_plan_steps_summary, doneSteps, totalSteps)
+        bindPlanProgress(
+            entries = todayEntries,
+            stepsSummary = homeTodayPlanStepsSummary,
+            hoursSummary = homeTodayPlanHoursSummary,
+            hoursProgress = homeTodayPlanHoursProgress,
+            stepsSummaryRes = R.string.home_today_plan_steps_summary,
+        )
+    }
+
+    private fun bindPlanProgress(
+        entries: List<HomeTodayPlanEntry>,
+        stepsSummary: TextView,
+        hoursSummary: TextView,
+        hoursProgress: ProgressBar,
+        stepsSummaryRes: Int,
+    ) {
+        val totalSteps = entries.size
+        val doneSteps = entries.count { it.step.completed }
+        stepsSummary.text = getString(stepsSummaryRes, doneSteps, totalSteps)
         var doneHours = 0.0
         var totalHours = 0.0
-        for (e in todayEntries) {
+        for (e in entries) {
             val h = e.step.estimatedHours ?: 0.0
             totalHours += h
             if (e.step.completed) doneHours += h
         }
-        homeTodayPlanHoursSummary.text = getString(
+        hoursSummary.text = getString(
             R.string.home_today_plan_hours_summary,
             formatTodaySummaryHours(doneHours),
             formatTodaySummaryHours(totalHours),
@@ -675,7 +800,7 @@ class HomeActivity : AppCompatActivity() {
         } else {
             0
         }
-        homeTodayPlanHoursProgress.progress = hourPercent
+        hoursProgress.progress = hourPercent
     }
 
     private fun applyTodayPlanStepCompletedStyle(
@@ -728,12 +853,18 @@ class HomeActivity : AppCompatActivity() {
     private fun bindPlanStepRows(parent: LinearLayout, visibleEntries: List<HomeTodayPlanEntry>) {
         parent.removeAllViews()
         val inflater = LayoutInflater.from(this)
-        var lastTaskId: String? = null
-        var isFirstHeader = true
         val density = resources.displayMetrics.density
         val headerTopFirst = (4 * density).toInt()
         val headerTopRest = (12 * density).toInt()
-        visibleEntries.forEach { entry ->
+        val taskOrder = visibleEntries.map { it.task.id }.distinct()
+        val taskRank = taskOrder.withIndex().associate { (idx, id) -> id to idx }
+        val orderedEntries = visibleEntries.sortedWith(
+            compareBy<HomeTodayPlanEntry> { taskRank[it.task.id] ?: Int.MAX_VALUE }
+                .thenBy { it.stepIndex },
+        )
+        var isFirstHeader = true
+        var lastTaskId: String? = null
+        for (entry in orderedEntries) {
             if (entry.task.id != lastTaskId) {
                 val header = inflater.inflate(R.layout.item_home_today_plan_task_header, parent, false)
                 val top = if (isFirstHeader) headerTopFirst else headerTopRest
@@ -790,9 +921,18 @@ class HomeActivity : AppCompatActivity() {
                 homeGetAheadFocusDate,
             )
             pruneCompletedReviewExpandedDays(reviewDays.map { it.first }.toSet())
-            bindCompletedReviewByDay(reviewDays, today)
+            bindCompletedReviewByDay(
+                reviewDays = reviewDays,
+                today = today,
+                getAheadVisible = getAheadVisible,
+                focusDay = homeGetAheadFocusDate,
+            )
             if (reviewDays.isEmpty()) {
                 homeTodayPlanEmpty.visibility = View.VISIBLE
+                homeTodayPlanCompletedTodayHost.visibility = View.GONE
+                homeTodayPlanCompletedTodayHost.removeAllViews()
+                homeTodayPlanFutureReviewBeforeFocusHost.visibility = View.GONE
+                homeTodayPlanFutureReviewBeforeFocusHost.removeAllViews()
                 homeTodayPlanCompletedByDayHost.visibility = View.GONE
                 homeTodayPlanCompletedByDayHost.removeAllViews()
             } else {
@@ -814,7 +954,11 @@ class HomeActivity : AppCompatActivity() {
             val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
             val hasStartedFutureWork = futureEntries.any { it.step.completed }
             val getAheadVisible = if (hasStartedFutureWork) {
-                bindGetAheadSection(allActiveTasks, today)
+                bindGetAheadSection(
+                    allActiveTasks = allActiveTasks,
+                    today = today,
+                    requireStartedOnFocusDay = true,
+                )
             } else {
                 false
             }
@@ -827,11 +971,21 @@ class HomeActivity : AppCompatActivity() {
                     homeGetAheadFocusDate,
                 )
                 pruneCompletedReviewExpandedDays(futureReviewDays.map { it.first }.toSet())
-                bindCompletedReviewByDay(futureReviewDays, today)
+                bindCompletedReviewByDay(
+                    reviewDays = futureReviewDays,
+                    today = today,
+                    getAheadVisible = getAheadVisible,
+                    focusDay = homeGetAheadFocusDate,
+                )
             } else {
                 homeGetAheadSection.visibility = View.GONE
+                homeGetAheadProgressBlock.visibility = View.GONE
                 homeGetAheadGroups.removeAllViews()
                 homeGetAheadFocusDate = null
+                homeTodayPlanCompletedTodayHost.visibility = View.GONE
+                homeTodayPlanCompletedTodayHost.removeAllViews()
+                homeTodayPlanFutureReviewBeforeFocusHost.visibility = View.GONE
+                homeTodayPlanFutureReviewBeforeFocusHost.removeAllViews()
                 homeTodayPlanCompletedByDayHost.visibility = View.GONE
                 homeTodayPlanCompletedByDayHost.removeAllViews()
                 homeCompletedReviewDaysExpanded.clear()

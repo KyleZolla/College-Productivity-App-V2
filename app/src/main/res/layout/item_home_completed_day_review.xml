@@ -24,6 +24,43 @@
         tools:text="You finished every step planned for this day."
         tools:visibility="visible" />
 
+    <LinearLayout
+        android:id="@+id/homeCompletedDayProgressBlock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/homeCompletedDayStepsSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="3 of 3 steps done" />
+
+        <TextView
+            android:id="@+id/homeCompletedDayHoursSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="4.0 of 4.0 hrs done" />
+
+        <ProgressBar
+            android:id="@+id/homeCompletedDayHoursProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:layout_marginTop="8dp"
+            android:max="1000"
+            android:progress="0"
+            tools:progress="1000" />
+    </LinearLayout>
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/homeCompletedDayToggle"
         style="@style/Widget.Material3.Button.TextButton"
