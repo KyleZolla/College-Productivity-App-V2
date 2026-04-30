@@ -33,7 +33,6 @@ class TaskDetailActivity : AppCompatActivity() {
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private var editDueButton: MaterialButton? = null
-    private var saveDueButton: MaterialButton? = null
     private lateinit var dueValue: TextView
     private lateinit var statusLine: TextView
     private lateinit var taskId: String
@@ -49,6 +48,8 @@ class TaskDetailActivity : AppCompatActivity() {
     private var roadmapSteps: MutableList<RoadmapStep> = mutableListOf()
     private var roadmapPatchInFlight = false
     private var statusPatchInFlight = false
+
+    private var achievementsUserId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,7 +85,6 @@ class TaskDetailActivity : AppCompatActivity() {
         statusLine = findViewById(R.id.taskDetailStatusLine)
 
         editDueButton = findViewById(R.id.taskDetailEditDue)
-        saveDueButton = findViewById(R.id.taskDetailSaveDue)
 
         roadmapProgress = findViewById(R.id.taskDetailRoadmapProgress)
         roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
@@ -98,15 +98,13 @@ class TaskDetailActivity : AppCompatActivity() {
         refreshStatusLine(savedStatus)
         refreshDueLabel()
         editDueButton?.setOnClickListener { pickDueDateTime() }
-        saveDueButton?.setOnClickListener { persistDueToDatabase() }
-
-        updateSaveEnabled()
 
         fetchLatestTask()
     }
 
     private fun fetchLatestTask() {
         val token = SessionManager.getAccessToken(this) ?: return
+        achievementsUserId = SupabaseUserId.resolveUserId(token)?.also { AchievementManager.ensureLoaded(token, it) }
         networkExecutor.execute {
             when (val result = SupabaseTasksApi.getTask(token, taskId)) {
                 is SupabaseTasksApi.GetResult.Failure -> runOnUiThread {
@@ -128,7 +126,6 @@ class TaskDetailActivity : AppCompatActivity() {
                         roadmapAdapter.submitList(emptyList())
                     }
                     refreshRoadmapProgress()
-                    updateSaveEnabled()
 
                     // Ensure status stays consistent with roadmap progress.
                     val derived = deriveStatusFromSteps(roadmapSteps)
@@ -196,6 +193,20 @@ class TaskDetailActivity : AppCompatActivity() {
         refreshRoadmapProgress()
         persistRoadmapToDatabase()
 
+        val token = SessionManager.getAccessToken(this)
+        val userId = token?.let { achievementsUserId ?: SupabaseUserId.resolveUserId(it) }
+        if (token != null && userId != null && checked) {
+            AchievementManager.ensureLoaded(token, userId)
+            val today = LocalDate.now()
+            val rec = RoadmapStep.recommendedLocalDate(cur)
+            if (rec != null && rec == today) {
+                AchievementManager.maybeShowFirstTaskCompleted(this, token, userId)
+            }
+            if (rec != null && rec.isAfter(today)) {
+                AchievementManager.maybeShowGettingAhead(this, token, userId)
+            }
+        }
+
         val derived = deriveStatusFromSteps(roadmapSteps)
         if (derived != savedStatus) {
             persistDerivedStatus(derived)
@@ -233,11 +244,6 @@ class TaskDetailActivity : AppCompatActivity() {
             display
         }
         dueValue.text = dueLine
-        updateSaveEnabled()
-    }
-
-    private fun updateSaveEnabled() {
-        saveDueButton?.isEnabled = draftDue != savedDue
     }
 
     private fun refreshStatusLine(status: TaskStatus) {
@@ -266,6 +272,8 @@ class TaskDetailActivity : AppCompatActivity() {
                     savedStatus = result.status
                     refreshStatusLine(savedStatus)
                     refreshDueLabel()
+
+                    // Achievements are step-based; do not trigger off task status changes here.
                 }
                 is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
                     statusPatchInFlight = false
@@ -297,6 +305,7 @@ class TaskDetailActivity : AppCompatActivity() {
                 picker.addOnPositiveButtonClickListener {
                     draftDue = LocalDateTime.of(date, LocalTime.of(picker.hour, picker.minute))
                     refreshDueLabel()
+                    persistDueToDatabase()
                 }
                 picker.show(supportFragmentManager, "task_detail_due_time")
             },
@@ -318,9 +327,8 @@ class TaskDetailActivity : AppCompatActivity() {
         if (target == savedDue) return
         val previousDue = savedDue
 
-        saveDueButton?.isEnabled = false
         editDueButton?.isEnabled = false
-        saveDueButton?.text = getString(R.string.task_detail_saving_due)
+        editDueButton?.text = getString(R.string.task_detail_saving_due)
 
         networkExecutor.execute {
             when (val result = SupabaseTasksApi.updateTaskDueDate(token, taskId, target)) {
@@ -357,7 +365,7 @@ class TaskDetailActivity : AppCompatActivity() {
                         draftDue = savedDue
                         refreshDueLabel()
                         editDueButton?.isEnabled = true
-                        saveDueButton?.text = getString(R.string.task_detail_save_due)
+                        editDueButton?.text = getString(R.string.task_detail_edit_due)
                         Toast.makeText(this, R.string.task_detail_due_saved, Toast.LENGTH_SHORT).show()
 
                         if (shiftedRoadmap != null) {
@@ -369,8 +377,8 @@ class TaskDetailActivity : AppCompatActivity() {
                 }
                 is SupabaseTasksApi.PatchDueResult.Failure -> runOnUiThread {
                     if (isFinishing) return@runOnUiThread
-                    saveDueButton?.text = getString(R.string.task_detail_save_due)
                     editDueButton?.isEnabled = true
+                    editDueButton?.text = getString(R.string.task_detail_edit_due)
                     draftDue = savedDue
                     refreshDueLabel()
                     Toast.makeText(
@@ -387,6 +395,7 @@ class TaskDetailActivity : AppCompatActivity() {
         networkExecutor.shutdownNow()
         super.onDestroy()
     }
+
 
     companion object {
         const val EXTRA_TASK_ID = "extra_task_id"

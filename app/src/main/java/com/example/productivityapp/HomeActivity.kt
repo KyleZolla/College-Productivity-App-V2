@@ -88,6 +88,8 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeUpcomingCards: LinearLayout
     private lateinit var homeViewAllTasks: TextView
 
+    private var achievementsUserId: String? = null
+
     private lateinit var profileDisplayName: TextView
     private lateinit var profileEmail: TextView
 
@@ -203,6 +205,11 @@ class HomeActivity : AppCompatActivity() {
         }
         val token = SessionManager.getAccessToken(this)
         if (!token.isNullOrBlank()) {
+            // Preload earned achievements (best-effort).
+            networkExecutor.execute {
+                achievementsUserId = SupabaseUserId.resolveUserId(token)
+                achievementsUserId?.let { AchievementManager.ensureLoaded(token, it) }
+            }
             // Keep home cards and task list aligned with Supabase (e.g. after status edit on detail).
             when (currentTab) {
                 Tab.Home -> loadTasks(showLoading = false)
@@ -996,13 +1003,21 @@ class HomeActivity : AppCompatActivity() {
     private fun onTodayPlanStepToggled(taskId: String, stepIndex: Int, checked: Boolean) {
         if (homeRoadmapPatchInFlight) return
         val token = SessionManager.getAccessToken(this) ?: return
+        val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
         val task = homeTasksSnapshot.find { it.id == taskId } ?: return
+        val beforeSnapshot = homeTasksSnapshot
         val steps = RoadmapStep.parseList(task.roadmap).toMutableList()
         if (stepIndex !in steps.indices) return
         if (steps[stepIndex].completed == checked) return
         val pinKey = "$taskId:$stepIndex"
         val today = LocalDate.now()
         val rec = RoadmapStep.recommendedLocalDate(steps[stepIndex])
+        val wasGetAheadStepCompleted = steps[stepIndex].completed
+        val wasTodayStep = rec != null && rec == today
+        val beforeTodayHalf = todayHalfwayRatio(beforeSnapshot, today)
+        val dayBeforeComplete = rec?.takeIf { !it.isBefore(today) }?.let { day ->
+            isPlanCompleteForDay(beforeSnapshot, today, day)
+        } ?: false
         when {
             rec == null -> {
                 homeTodayPlanPinnedCheckedKeys.remove(pinKey)
@@ -1062,7 +1077,83 @@ class HomeActivity : AppCompatActivity() {
         }
         bindHomeTodayPlan(homeTasksSnapshot)
         bindHomePreviewCards(homeTasksSnapshot.take(3))
+
+        // Achievement: "First task completed" — repurposed to step-based:
+        // trigger the first time the user checks off ANY step on today's plan.
+        if (userIdForAchievements != null && wasTodayStep && checked) {
+            AchievementManager.ensureLoaded(token, userIdForAchievements)
+            AchievementManager.maybeShowFirstTaskCompleted(this, token, userIdForAchievements)
+        }
+
+        // Achievement: "Getting ahead" (first future step completion via Get Ahead / future-day work).
+        if (userIdForAchievements != null && rec != null && rec.isAfter(today) && checked && !wasGetAheadStepCompleted) {
+            AchievementManager.ensureLoaded(token, userIdForAchievements)
+            AchievementManager.maybeShowGettingAhead(this, token, userIdForAchievements)
+        }
+
+        // Achievement: "Plan complete" (fires each time a day transitions to fully done).
+        var planCompleteFired = false
+        if (rec != null && !rec.isBefore(today)) {
+            val afterComplete = isPlanCompleteForDay(homeTasksSnapshot, today, rec)
+            if (!dayBeforeComplete && afterComplete) {
+                AchievementManager.showPlanComplete(this, rec)
+                planCompleteFired = true
+            }
+        }
+
+        // Achievement: "Halfway There!" — based on TODAY's plan work (hours-first).
+        // Fire when we cross >= 50% for today's plan, but not if we also completed the day.
+        if (userIdForAchievements != null && checked && !planCompleteFired) {
+            val afterTodayHalf = todayHalfwayRatio(homeTasksSnapshot, today)
+            if (beforeTodayHalf < 0.5 && afterTodayHalf >= 0.5) {
+                AchievementManager.ensureLoaded(token, userIdForAchievements)
+                AchievementManager.maybeShowHalfwayThroughCurrentTasks(this, token, userIdForAchievements)
+            }
+        }
+
         persistTodayPlanRoadmap(token, taskId, steps, derived, previousStatus)
+    }
+
+    /**
+     * Completion ratio for today's planned work, preferring hours when present.
+     * Falls back to steps when all estimated hours are missing/zero.
+     */
+    private fun todayHalfwayRatio(
+        tasksSnapshot: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): Double {
+        val todayEntries = collectTodayPlanEntries(tasksSnapshot, today)
+            .filter { it.recommendedOn == today }
+        if (todayEntries.isEmpty()) return 0.0
+        val totalSteps = todayEntries.size
+        val doneSteps = todayEntries.count { it.step.completed }
+        var totalHours = 0.0
+        var doneHours = 0.0
+        for (e in todayEntries) {
+            val h = e.step.estimatedHours ?: 0.0
+            totalHours += h
+            if (e.step.completed) doneHours += h
+        }
+        return if (totalHours > 0.0) {
+            (doneHours / totalHours).coerceIn(0.0, 1.0)
+        } else if (totalSteps > 0) {
+            (doneSteps.toDouble() / totalSteps.toDouble()).coerceIn(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    private fun isPlanCompleteForDay(
+        tasksSnapshot: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+        day: LocalDate,
+    ): Boolean {
+        val entries = if (day.isAfter(today)) {
+            collectFuturePlanEntries(tasksSnapshot, today)
+        } else {
+            collectTodayPlanEntries(tasksSnapshot, today)
+        }.filter { it.recommendedOn == day }
+        return entries.isNotEmpty() && entries.all { it.step.completed }
     }
 
     private fun persistTodayPlanRoadmap(
@@ -1108,6 +1199,11 @@ class HomeActivity : AppCompatActivity() {
                                 bindHomePreviewCards(homeTasksSnapshot.take(3))
                                 if (currentTab == Tab.Tasks) {
                                     loadTasks(showLoading = false)
+                                }
+
+                                val userId = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
+                                if (userId != null) {
+                                    AchievementManager.ensureLoaded(token, userId)
                                 }
                             }
                         }
