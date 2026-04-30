@@ -24,7 +24,10 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import java.util.Calendar
+import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.abs
+import kotlin.math.round
 
 class TaskDetailActivity : AppCompatActivity() {
 
@@ -40,6 +43,7 @@ class TaskDetailActivity : AppCompatActivity() {
     private var draftDue: LocalDateTime? = null
     private lateinit var roadmapProgress: ProgressBar
     private lateinit var roadmapProgressLabel: TextView
+    private lateinit var roadmapHoursSummary: TextView
     private lateinit var roadmapList: RecyclerView
     private lateinit var roadmapAdapter: RoadmapStepsAdapter
     private var roadmapSteps: MutableList<RoadmapStep> = mutableListOf()
@@ -84,6 +88,7 @@ class TaskDetailActivity : AppCompatActivity() {
 
         roadmapProgress = findViewById(R.id.taskDetailRoadmapProgress)
         roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
+        roadmapHoursSummary = findViewById(R.id.taskDetailRoadmapHoursSummary)
         roadmapList = findViewById(R.id.taskDetailRoadmapList)
         roadmapAdapter = RoadmapStepsAdapter { index, checked -> onRoadmapStepToggled(index, checked) }
         roadmapList.layoutManager = LinearLayoutManager(this)
@@ -136,11 +141,50 @@ class TaskDetailActivity : AppCompatActivity() {
     }
 
     private fun refreshRoadmapProgress() {
-        val completed = roadmapSteps.count { it.completed }
-        val total = roadmapSteps.size
-        val percent = if (total == 0) 0 else ((completed.toDouble() / total.toDouble()) * 100.0).toInt()
-        roadmapProgress.progress = percent
-        roadmapProgressLabel.text = "$completed/$total steps completed"
+        val totalSteps = roadmapSteps.size
+        val doneSteps = roadmapSteps.count { it.completed }
+        if (totalSteps <= 0) {
+            roadmapProgressLabel.visibility = View.GONE
+            roadmapHoursSummary.visibility = View.GONE
+            roadmapProgress.visibility = View.GONE
+            return
+        }
+
+        roadmapProgressLabel.visibility = View.VISIBLE
+        roadmapHoursSummary.visibility = View.VISIBLE
+        roadmapProgress.visibility = View.VISIBLE
+
+        roadmapProgressLabel.text = getString(R.string.home_plan_steps_summary, doneSteps, totalSteps)
+
+        var doneHours = 0.0
+        var totalHours = 0.0
+        for (step in roadmapSteps) {
+            val h = step.estimatedHours ?: 0.0
+            totalHours += h
+            if (step.completed) doneHours += h
+        }
+        roadmapHoursSummary.text = getString(
+            R.string.home_today_plan_hours_summary,
+            formatRoadmapSummaryHours(doneHours),
+            formatRoadmapSummaryHours(totalHours),
+        )
+
+        val hourPercent = if (totalHours > 0.0) {
+            ((doneHours / totalHours) * 1000.0).toInt().coerceIn(0, 1000)
+        } else {
+            ((doneSteps.toDouble() / totalSteps.toDouble()) * 1000.0).toInt().coerceIn(0, 1000)
+        }
+        roadmapProgress.progress = hourPercent
+    }
+
+    private fun formatRoadmapSummaryHours(hours: Double): String {
+        if (hours <= 0.0) return "0"
+        val rounded = round(hours * 10.0) / 10.0
+        return if (abs(rounded - rounded.toInt()) < 0.05) {
+            rounded.toInt().toString()
+        } else {
+            String.format(Locale.getDefault(), "%.1f", rounded)
+        }
     }
 
     private fun onRoadmapStepToggled(index: Int, checked: Boolean) {

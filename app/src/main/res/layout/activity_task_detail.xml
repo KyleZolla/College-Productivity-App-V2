@@ -147,13 +147,22 @@
                         android:textColor="?attr/colorOnSurfaceVariant"
                         tools:text="0/0 steps completed" />
 
+                    <TextView
+                        android:id="@+id/taskDetailRoadmapHoursSummary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        tools:text="0 of 0 hrs done" />
+
                     <ProgressBar
                         android:id="@+id/taskDetailRoadmapProgress"
                         style="?android:attr/progressBarStyleHorizontal"
                         android:layout_width="match_parent"
-                        android:layout_height="10dp"
+                        android:layout_height="8dp"
                         android:layout_marginTop="10dp"
-                        android:max="100"
+                        android:max="1000"
                         android:progress="0" />
 
                     <androidx.recyclerview.widget.RecyclerView
