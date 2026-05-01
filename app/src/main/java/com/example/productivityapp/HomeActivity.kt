@@ -1054,6 +1054,8 @@ class HomeActivity : AppCompatActivity() {
         if (homeRoadmapPatchInFlight) return
         val token = SessionManager.getAccessToken(this) ?: return
         val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
+        // Use the resolved user id for profile writes even if achievements are disabled/unavailable.
+        val userIdForProfileWrites = userIdForAchievements
         val task = homeTasksSnapshot.find { it.id == taskId } ?: return
         val beforeSnapshot = homeTasksSnapshot
         val steps = RoadmapStep.parseList(task.roadmap).toMutableList()
@@ -1147,8 +1149,8 @@ class HomeActivity : AppCompatActivity() {
             val afterComplete = isPlanCompleteForDay(homeTasksSnapshot, today, rec)
             if (!dayBeforeComplete && afterComplete) {
                 planCompleteFired = true
-                if (userIdForAchievements != null) {
-                    val uid = userIdForAchievements
+                if (userIdForProfileWrites != null) {
+                    val uid = userIdForProfileWrites
                     val dayForPopup = rec
                     networkExecutor.execute {
                         val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, dayForPopup)
@@ -1160,6 +1162,15 @@ class HomeActivity : AppCompatActivity() {
                     }
                 } else {
                     AchievementManager.showPlanComplete(this, rec, 1)
+                }
+            } else if (dayBeforeComplete && !afterComplete && rec == today) {
+                // Today flipped from complete → incomplete (user unchecked something).
+                // Undo the streak write by restoring prior values from the profile backup.
+                if (userIdForProfileWrites != null) {
+                    val uid = userIdForProfileWrites
+                    networkExecutor.execute {
+                        StreakCoordinator.undoTodayCompletionIfPossible(token, uid)
+                    }
                 }
             }
         }

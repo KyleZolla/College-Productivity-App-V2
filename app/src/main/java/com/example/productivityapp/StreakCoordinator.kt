@@ -26,6 +26,7 @@ object StreakCoordinator {
                 id = userId,
                 currentStreak = 0,
                 lastCompletedDate = null,
+                lastCompletedDateBackup = null,
             )
             is SupabaseProfilesApi.GetResult.Failure -> {
                 Log.w("StreakCoordinator", "Could not load profile for streak; popup streak may be wrong.")
@@ -66,7 +67,16 @@ object StreakCoordinator {
             else -> 1
         }
 
-        when (val w = SupabaseProfilesApi.upsertStreak(accessToken, userId, newStreak, today)) {
+        // Backup the previous lastCompletedDate so we can undo if today's completion is reversed later.
+        when (
+            val w = SupabaseProfilesApi.upsertTodayStreakWithLastCompletedDateBackup(
+                accessToken = accessToken,
+                userId = userId,
+                newCurrentStreak = newStreak,
+                newLastCompletedDate = today,
+                lastCompletedDateBackup = profile.lastCompletedDate,
+            )
+        ) {
             is SupabaseProfilesApi.PatchResult.Success -> {
                 // Show exactly what PostgREST stored (source of truth after write).
                 return when (val again = SupabaseProfilesApi.get(accessToken, userId)) {
@@ -79,6 +89,35 @@ object StreakCoordinator {
                 Log.w("StreakCoordinator", "Could not save streak to profiles: ${w.message}")
                 return newStreak
             }
+        }
+    }
+
+    /**
+     * Opposite of completing today's plan: if the user unchecks something after completion and today
+     * flips from complete → incomplete, restore streak fields from the backup and clear it.
+     */
+    fun undoTodayCompletionIfPossible(
+        accessToken: String,
+        userId: String,
+    ) {
+        val today = LocalDate.now()
+        val profile = when (val r = SupabaseProfilesApi.get(accessToken, userId)) {
+            is SupabaseProfilesApi.GetResult.Success -> r.row
+            else -> return
+        }
+
+        // Only undo if today's completion is what we currently have recorded.
+        if (profile.lastCompletedDate != today) return
+
+        when (
+            val w = SupabaseProfilesApi.undoTodayCompletionDecrementStreakAndRestoreLastCompletedDate(
+                accessToken,
+                userId,
+            )
+        ) {
+            is SupabaseProfilesApi.PatchResult.Success -> Unit
+            is SupabaseProfilesApi.PatchResult.Failure ->
+                Log.w("StreakCoordinator", "Could not undo today's streak completion: ${w.message}")
         }
     }
 }

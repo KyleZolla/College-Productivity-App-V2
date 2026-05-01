@@ -19,6 +19,7 @@ object SupabaseProfilesApi {
         val id: String,
         val currentStreak: Int,
         val lastCompletedDate: LocalDate?,
+        val lastCompletedDateBackup: LocalDate?,
     )
 
     sealed class GetResult {
@@ -41,7 +42,8 @@ object SupabaseProfilesApi {
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
             val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
-            val query = "select=id,currentStreak,lastCompletedDate&id=eq.$enc"
+            val query =
+                "select=id,currentStreak,lastCompletedDate,lastCompletedDateBackup&id=eq.$enc"
             val url = URL("$base/rest/v1/profiles?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -97,6 +99,125 @@ object SupabaseProfilesApi {
                 return postNewProfileStreak(accessToken, id, currentStreak, lastCompletedDate)
             }
             is PatchAttemptResult.Error -> return PatchResult.Failure(patch.message)
+        }
+    }
+
+    /**
+     * Persist today's streak update plus a backup of the previous `lastCompletedDate` so we can undo
+     * a completion if the user unchecks a step after completing today's plan.
+     */
+    fun upsertTodayStreakWithLastCompletedDateBackup(
+        accessToken: String,
+        userId: String,
+        newCurrentStreak: Int,
+        newLastCompletedDate: LocalDate,
+        lastCompletedDateBackup: LocalDate?,
+    ): PatchResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return PatchResult.Failure("Missing Supabase config.")
+        }
+        val id = userId.trim()
+        if (id.isEmpty()) return PatchResult.Failure("Missing user id.")
+        val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
+        val fields = JSONObject()
+            .put("currentStreak", newCurrentStreak)
+            .put("lastCompletedDate", newLastCompletedDate.toString())
+            .put("lastCompletedDateBackup", lastCompletedDateBackup?.toString() ?: JSONObject.NULL)
+
+        val patch = patchProfilesById(accessToken, enc, fields)
+        return when (patch) {
+            is PatchAttemptResult.Updated -> PatchResult.Success
+            is PatchAttemptResult.NoRowUpdated -> postNewProfileTodayStreakWithBackup(
+                accessToken,
+                id,
+                newCurrentStreak,
+                newLastCompletedDate,
+                lastCompletedDateBackup,
+            )
+            is PatchAttemptResult.Error -> PatchResult.Failure(patch.message)
+        }
+    }
+
+    /**
+     * Decrement `currentStreak`, restore `lastCompletedDate` from `lastCompletedDateBackup`, and clear it.
+     */
+    fun undoTodayCompletionDecrementStreakAndRestoreLastCompletedDate(
+        accessToken: String,
+        userId: String,
+    ): PatchResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return PatchResult.Failure("Missing Supabase config.")
+        }
+        val id = userId.trim()
+        if (id.isEmpty()) return PatchResult.Failure("Missing user id.")
+        val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
+
+        // Need current values + backup to restore from.
+        val profile = when (val g = get(accessToken, id)) {
+            is GetResult.Success -> g.row
+            is GetResult.NotFound -> return PatchResult.Failure("Profile not found.")
+            is GetResult.Failure -> return PatchResult.Failure(g.message)
+        }
+
+        val restoredDate = profile.lastCompletedDateBackup
+        val decrementedStreak = (profile.currentStreak - 1).coerceAtLeast(0)
+
+        val fields = JSONObject()
+            .put("currentStreak", decrementedStreak)
+            .put("lastCompletedDate", restoredDate?.toString() ?: JSONObject.NULL)
+            .put("lastCompletedDateBackup", JSONObject.NULL)
+
+        val patch = patchProfilesById(accessToken, enc, fields)
+        return when (patch) {
+            is PatchAttemptResult.Updated -> PatchResult.Success
+            is PatchAttemptResult.NoRowUpdated -> PatchResult.Failure("Profile not found.")
+            is PatchAttemptResult.Error -> PatchResult.Failure(patch.message)
+        }
+    }
+
+    private fun postNewProfileTodayStreakWithBackup(
+        accessToken: String,
+        userId: String,
+        newCurrentStreak: Int,
+        newLastCompletedDate: LocalDate,
+        lastCompletedDateBackup: LocalDate?,
+    ): PatchResult {
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val url = URL("$base/rest/v1/profiles")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=minimal")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject()
+                .put("id", userId)
+                .put("currentStreak", newCurrentStreak)
+                .put("lastCompletedDate", newLastCompletedDate.toString())
+                .put("lastCompletedDateBackup", lastCompletedDateBackup?.toString() ?: JSONObject.NULL)
+            val body = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(body.size)
+            connection.outputStream.use { it.write(body) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode in 200..299) {
+                PatchResult.Success
+            } else {
+                PatchResult.Failure(parseError(responseBody, responseCode))
+            }
+        } catch (e: Exception) {
+            PatchResult.Failure(e.message ?: "Network error.")
         }
     }
 
@@ -270,7 +391,22 @@ object SupabaseProfilesApi {
             else -> null
         }
         val lastDate = parseDateField(lastRaw)
-        return ProfileRow(id = id, currentStreak = streak, lastCompletedDate = lastDate)
+
+        val backupLastRaw = when {
+            obj.has("lastCompletedDateBackup") && !obj.isNull("lastCompletedDateBackup") ->
+                obj.get("lastCompletedDateBackup")
+            obj.has("last_completed_date_backup") && !obj.isNull("last_completed_date_backup") ->
+                obj.get("last_completed_date_backup")
+            else -> null
+        }
+        val backupLast = parseDateField(backupLastRaw)
+
+        return ProfileRow(
+            id = id,
+            currentStreak = streak,
+            lastCompletedDate = lastDate,
+            lastCompletedDateBackup = backupLast,
+        )
     }
 
     private fun parseDateField(raw: Any?): LocalDate? {

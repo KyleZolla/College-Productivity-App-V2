@@ -52,15 +52,53 @@ object AchievementManager {
         val id = userId.trim()
         if (id.isEmpty()) return
         val cache = cacheByUserId.getOrPut(id) { Cache() }
-        if (cache.firstTaskCompleted) return
-        cache.firstTaskCompleted = true
-        AchievementPopup.show(
-            activity = activity,
-            emoji = "🎉",
-            title = "First Task Done!",
-            message = "You completed your first task. The journey begins! 🎉",
-        )
+        if (cache.loaded) {
+            if (cache.firstTaskCompleted) return
+            cache.firstTaskCompleted = true
+            AchievementPopup.show(
+                activity = activity,
+                emoji = "🎉",
+                title = "First Task Done!",
+                message = "You completed your first task. The journey begins! 🎉",
+            )
+            executor.execute {
+                SupabaseAchievementsApi.upsert(accessToken, id, firstTaskCompleted = true)
+            }
+            return
+        }
+
+        // Cold start: cache isn't loaded yet. Avoid showing based on defaults; load from Supabase first.
         executor.execute {
+            when (val res = SupabaseAchievementsApi.get(accessToken, id)) {
+                is SupabaseAchievementsApi.GetResult.Success -> {
+                    val row = res.row
+                    val c = cacheByUserId.getOrPut(id) { Cache() }
+                    c.firstTaskCompleted = row.firstTaskCompleted
+                    c.gettingAhead = row.gettingAhead
+                    c.halfwayThroughCurrentTasks = row.halfwayThroughCurrentTasks
+                    c.loaded = true
+                }
+                is SupabaseAchievementsApi.GetResult.NotFound -> {
+                    val c = cacheByUserId.getOrPut(id) { Cache() }
+                    c.loaded = true
+                }
+                is SupabaseAchievementsApi.GetResult.Failure -> {
+                    // If we can't confirm, skip showing to avoid false positives.
+                    return@execute
+                }
+            }
+
+            val c2 = cacheByUserId.getOrPut(id) { Cache() }
+            if (c2.firstTaskCompleted) return@execute
+            c2.firstTaskCompleted = true
+            activity.runOnUiThread {
+                AchievementPopup.show(
+                    activity = activity,
+                    emoji = "🎉",
+                    title = "First Task Done!",
+                    message = "You completed your first task. The journey begins! 🎉",
+                )
+            }
             SupabaseAchievementsApi.upsert(accessToken, id, firstTaskCompleted = true)
         }
     }
