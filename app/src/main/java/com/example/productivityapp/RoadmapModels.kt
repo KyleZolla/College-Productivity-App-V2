@@ -2,7 +2,9 @@ package com.example.productivityapp
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
@@ -13,6 +15,11 @@ data class RoadmapStep(
     val estimatedHours: Double?,
     val priority: Priority,
     val completed: Boolean,
+    /**
+     * ISO-8601 instant when the step was marked complete (e.g. `Instant.now().toString()`).
+     * Used to show only overdue steps **finished today** in “View what you completed”, not all past completed work.
+     */
+    val completedAt: String? = null,
 ) {
     enum class Priority { HIGH, MEDIUM, LOW }
 
@@ -28,6 +35,7 @@ data class RoadmapStep(
                 Priority.LOW -> "Low"
             })
             .put("completed", completed)
+            .put("completedAt", completedAt ?: JSONObject.NULL)
     }
 
     companion object {
@@ -70,6 +78,12 @@ data class RoadmapStep(
                 else -> Priority.MEDIUM
             }
             val completed = obj.optBoolean("completed", false)
+            val completedAtRaw = when {
+                obj.has("completedAt") && !obj.isNull("completedAt") -> obj.optString("completedAt")
+                obj.has("completed_at") && !obj.isNull("completed_at") -> obj.optString("completed_at")
+                else -> ""
+            }
+            val completedAt = completedAtRaw.trim().takeIf { it.isNotEmpty() }
             return RoadmapStep(
                 title = title,
                 description = description,
@@ -77,7 +91,19 @@ data class RoadmapStep(
                 estimatedHours = estimatedHours,
                 priority = priority,
                 completed = completed,
+                completedAt = completedAt,
             )
+        }
+
+        /** Calendar day (device zone) when the step was marked complete, if [completedAt] is set. */
+        fun completionLocalDate(step: RoadmapStep, zone: ZoneId = ZoneId.systemDefault()): LocalDate? {
+            val raw = step.completedAt?.trim().orEmpty()
+            if (raw.isEmpty()) return null
+            return try {
+                Instant.parse(raw).atZone(zone).toLocalDate()
+            } catch (_: Exception) {
+                runCatching { LocalDate.parse(raw.take(10)) }.getOrNull()
+            }
         }
 
         /**

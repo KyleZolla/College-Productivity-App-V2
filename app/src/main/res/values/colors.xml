@@ -11,4 +11,6 @@
     <color name="home_urgent_card_stroke">#6750A4</color>
     <color name="home_urgent_pill_bg">#6750A4</color>
     <color name="home_urgent_pill_text">#FFFFFF</color>
+    <!-- Due pill when task due date has passed (overdue); text uses theme colorError -->
+    <color name="home_overdue_pill_bg">#F9DEDC</color>
 </resources>

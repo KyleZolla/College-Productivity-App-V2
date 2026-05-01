@@ -3,7 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginTop="16dp"
+    android:layout_marginTop="0dp"
     android:orientation="vertical">
 
     <TextView
@@ -11,18 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
-        tools:text="Wednesday, April 29" />
-
-    <TextView
-        android:id="@+id/homeCompletedDaySubtitle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-        android:textColor="?attr/colorOnSurfaceVariant"
-        android:visibility="gone"
-        tools:text="You finished every step planned for this day."
-        tools:visibility="visible" />
+        tools:text="Today" />
 
     <LinearLayout
         android:id="@+id/homeCompletedDayProgressBlock"
@@ -61,12 +50,23 @@
             tools:progress="1000" />
     </LinearLayout>
 
+    <TextView
+        android:id="@+id/homeCompletedDayAllDoneBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+        android:textColor="?attr/colorOnSurface"
+        android:visibility="gone"
+        tools:text="You completed every step on your plan for today."
+        tools:visibility="visible" />
+
     <com.google.android.material.button.MaterialButton
         android:id="@+id/homeCompletedDayToggle"
         style="@style/Widget.Material3.Button.TextButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="8dp"
         android:minHeight="0dp"
         android:paddingStart="0dp"
         android:paddingEnd="0dp"

@@ -24,8 +24,10 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -406,6 +408,58 @@ class HomeActivity : AppCompatActivity() {
         return out
     }
 
+    /** All roadmap steps on or before [today] (raw pool; includes completed overdue). */
+    private fun todayPlanScopeEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<HomeTodayPlanEntry> = collectTodayPlanEntries(tasks, today)
+
+    /**
+     * **Today's plan** work set: unchecked steps from before [today], plus every step scheduled on [today]
+     * (done or not). Completed overdue steps are excluded — they are not part of today's workload.
+     * Used for the list, progress bar, halfway popup, and plan-complete / streak.
+     */
+    private fun todayPlanWorkEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<HomeTodayPlanEntry> {
+        val scope = todayPlanScopeEntries(tasks, today)
+        val incompleteOverdue = scope.filter { it.recommendedOn.isBefore(today) && !it.step.completed }
+        val todayEntries = scope.filter { it.recommendedOn == today }
+        return incompleteOverdue + todayEntries
+    }
+
+    private fun isTodayWorkPlanComplete(
+        tasksSnapshot: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): Boolean {
+        val work = todayPlanWorkEntries(tasksSnapshot, today)
+        return work.isNotEmpty() && work.all { it.step.completed }
+    }
+
+    /**
+     * “View what you completed” for the calendar day [today]:
+     * - All completed steps **scheduled for** [today].
+     * - Completed steps scheduled **before** [today] only if [RoadmapStep.completedAt] falls on [today]
+     *   (catch-up / overdue cleared today), not work finished on an earlier calendar day.
+     */
+    private fun todayPlanCompletedReviewEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<HomeTodayPlanEntry> {
+        val zone = ZoneId.systemDefault()
+        return todayPlanScopeEntries(tasks, today).filter { entry ->
+            if (!entry.step.completed) return@filter false
+            when {
+                entry.recommendedOn.isAfter(today) -> false
+                entry.recommendedOn == today -> true
+                entry.recommendedOn.isBefore(today) ->
+                    RoadmapStep.completionLocalDate(entry.step, zone) == today
+                else -> false
+            }
+        }
+    }
+
     private fun collectFuturePlanEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
@@ -431,16 +485,22 @@ class HomeActivity : AppCompatActivity() {
 
     private fun sortTodayPlanEntries(entries: List<HomeTodayPlanEntry>, today: LocalDate): List<HomeTodayPlanEntry> {
         val (past, dueToday) = entries.partition { it.recommendedOn.isBefore(today) }
-        val sortedPast = past
-            .groupBy { it.recommendedOn }
-            .toSortedMap()
-            .values
-            .flatMap { dayEntries ->
-                sortByTaskRankThenRoadmap(dayEntries, todayTaskRankComparator())
-            }
+        val sortedPast = sortByTaskRankThenRoadmap(past, overdueAwareTaskRankComparator())
         val sortedToday = sortByTaskRankThenRoadmap(dueToday, todayTaskRankComparator())
         return sortedPast + sortedToday
     }
+
+    /** Overdue tasks (by due date) rise to the top within the past-due step bucket. */
+    private fun overdueAwareTaskRankComparator(): Comparator<HomeTodayPlanEntry> =
+        Comparator { a, b ->
+            val oa = DueDateHumanLabel.isOverdue(a.task.dueDate, a.task.status)
+            val ob = DueDateHumanLabel.isOverdue(b.task.dueDate, b.task.status)
+            when {
+                oa && !ob -> -1
+                !oa && ob -> 1
+                else -> todayTaskRankComparator().compare(a, b)
+            }
+        }
 
     /**
      * Ordered future-day review buckets (excluding today's bucket): include days where at least one
@@ -496,6 +556,7 @@ class HomeActivity : AppCompatActivity() {
         var hasFutureBlocks = false
         val inflater = LayoutInflater.from(this)
         val dateFmt = DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.getDefault())
+        val gapBetweenReviewBlocksPx = (12 * resources.displayMetrics.density).toInt()
         for ((day, list) in reviewDays) {
             val targetHost = when {
                 day == today -> homeTodayPlanCompletedTodayHost
@@ -504,24 +565,31 @@ class HomeActivity : AppCompatActivity() {
                 else -> homeTodayPlanCompletedByDayHost
             }
             val block = inflater.inflate(R.layout.item_home_completed_day_review, targetHost, false)
+            if (targetHost.childCount > 0) {
+                val lp = block.layoutParams as? LinearLayout.LayoutParams
+                    ?: LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    )
+                lp.topMargin = gapBetweenReviewBlocksPx
+                block.layoutParams = lp
+            }
             val title = block.findViewById<TextView>(R.id.homeCompletedDayTitle)
-            val subtitle = block.findViewById<TextView>(R.id.homeCompletedDaySubtitle)
             val progressBlock = block.findViewById<LinearLayout>(R.id.homeCompletedDayProgressBlock)
+            val allDoneBanner = block.findViewById<TextView>(R.id.homeCompletedDayAllDoneBanner)
             val stepsSummary = block.findViewById<TextView>(R.id.homeCompletedDayStepsSummary)
             val hoursSummary = block.findViewById<TextView>(R.id.homeCompletedDayHoursSummary)
             val hoursProgress = block.findViewById<ProgressBar>(R.id.homeCompletedDayHoursProgress)
             val toggle = block.findViewById<MaterialButton>(R.id.homeCompletedDayToggle)
             val stepsHost = block.findViewById<LinearLayout>(R.id.homeCompletedDaySteps)
-            title.text = day.format(dateFmt)
+            title.text = if (day == today) {
+                getString(R.string.home_today_plan_review_title_today)
+            } else {
+                day.format(dateFmt)
+            }
             val allDoneOnDay = list.all { it.step.completed }
             val partiallyDoneFutureDay = day.isAfter(today) && !allDoneOnDay
-            if (day.isAfter(today) && allDoneOnDay) {
-                subtitle.visibility = View.VISIBLE
-                subtitle.text = getString(R.string.home_today_plan_progression_day_done, day.format(dateFmt))
-            } else {
-                subtitle.visibility = View.GONE
-            }
-            if (day.isAfter(today)) {
+            if (day.isAfter(today) || day == today) {
                 progressBlock.visibility = View.VISIBLE
                 bindPlanProgress(
                     entries = list,
@@ -532,6 +600,21 @@ class HomeActivity : AppCompatActivity() {
                 )
             } else {
                 progressBlock.visibility = View.GONE
+            }
+            when {
+                partiallyDoneFutureDay -> allDoneBanner.visibility = View.GONE
+                day == today -> {
+                    allDoneBanner.visibility = View.VISIBLE
+                    allDoneBanner.text = getString(R.string.home_today_plan_all_done_banner_today)
+                }
+                day.isAfter(today) && allDoneOnDay -> {
+                    allDoneBanner.visibility = View.VISIBLE
+                    allDoneBanner.text = getString(
+                        R.string.home_today_plan_progression_day_done,
+                        day.format(dateFmt),
+                    )
+                }
+                else -> allDoneBanner.visibility = View.GONE
             }
             val dayKey = day.toString()
             val expanded = dayKey in homeCompletedReviewDaysExpanded
@@ -782,21 +865,6 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun bindTodayPlanProgress(todayEntries: List<HomeTodayPlanEntry>) {
-        if (todayEntries.isEmpty()) {
-            homeTodayPlanProgressBlock.visibility = View.GONE
-            return
-        }
-        homeTodayPlanProgressBlock.visibility = View.VISIBLE
-        bindPlanProgress(
-            entries = todayEntries,
-            stepsSummary = homeTodayPlanStepsSummary,
-            hoursSummary = homeTodayPlanHoursSummary,
-            hoursProgress = homeTodayPlanHoursProgress,
-            stepsSummaryRes = R.string.home_today_plan_steps_summary,
-        )
-    }
-
     private fun bindPlanProgress(
         entries: List<HomeTodayPlanEntry>,
         stepsSummary: TextView,
@@ -942,39 +1010,38 @@ class HomeActivity : AppCompatActivity() {
         homeTasksSnapshot = allActiveTasks
         homeTodayPlanSection.visibility = View.VISIBLE
         val today = LocalDate.now()
-        val entries = collectTodayPlanEntries(allActiveTasks, today)
-        // Show overdue (unchecked) steps + today's steps.
-        val todayEntries = entries.filter { it.recommendedOn == today }
-        val overdueEntries = entries.filter { it.recommendedOn.isBefore(today) && !it.step.completed }
-        // Overdue first, then today's items; keep stable order after sorting.
-        val displayEntries = overdueEntries + todayEntries
-        if (displayEntries.isEmpty()) {
+        val workEntries = todayPlanWorkEntries(allActiveTasks, today)
+        val overdueIncomplete = workEntries.filter { it.recommendedOn.isBefore(today) }
+        val displayEntries = workEntries
+        if (workEntries.isEmpty()) {
             homeTodayPlanProgressBlock.visibility = View.GONE
         } else {
             homeTodayPlanProgressBlock.visibility = View.VISIBLE
-            // Since we can include overdue steps, use the generic summary (not "done today").
             bindPlanProgress(
-                entries = displayEntries,
+                entries = workEntries,
                 stepsSummary = homeTodayPlanStepsSummary,
                 hoursSummary = homeTodayPlanHoursSummary,
                 hoursProgress = homeTodayPlanHoursProgress,
-                stepsSummaryRes = if (overdueEntries.isEmpty()) {
+                stepsSummaryRes = if (overdueIncomplete.isEmpty()) {
                     R.string.home_today_plan_steps_summary
                 } else {
                     R.string.home_plan_steps_summary
                 },
             )
         }
-        val hasIncomplete = displayEntries.any { !it.step.completed }
+        val hasIncomplete = workEntries.any { !it.step.completed }
         if (!hasIncomplete) {
+            // All active work is done: use review rows only for progress (avoid duplicating the main bar).
+            homeTodayPlanProgressBlock.visibility = View.GONE
             val getAheadVisible = bindGetAheadSection(allActiveTasks, today)
             val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
             homeTodayPlanEmpty.text = formatTodayPlanCollapsedEmptyText()
             homeTodayPlanToggle.visibility = View.GONE
             homeTodayPlanGroups.visibility = View.GONE
             homeTodayPlanGroups.removeAllViews()
+            val reviewTodayEntries = todayPlanCompletedReviewEntries(allActiveTasks, today)
             val reviewDays = buildCompletedReviewDays(
-                displayEntries,
+                reviewTodayEntries,
                 futureEntries,
                 today,
                 getAheadVisible,
@@ -996,8 +1063,8 @@ class HomeActivity : AppCompatActivity() {
                 homeTodayPlanCompletedByDayHost.visibility = View.GONE
                 homeTodayPlanCompletedByDayHost.removeAllViews()
             } else {
-                homeTodayPlanEmpty.visibility =
-                    if (homeCompletedReviewDaysExpanded.isEmpty()) View.VISIBLE else View.GONE
+                // Do not show “nothing scheduled” when there is a completed-work or future-day section.
+                homeTodayPlanEmpty.visibility = View.GONE
             }
         } else {
             homeTodayPlanEmpty.visibility = View.GONE
@@ -1068,11 +1135,9 @@ class HomeActivity : AppCompatActivity() {
         val today = LocalDate.now()
         val rec = RoadmapStep.recommendedLocalDate(steps[stepIndex])
         val wasGetAheadStepCompleted = steps[stepIndex].completed
-        val wasTodayStep = rec != null && rec == today
+        val wasInTodayPlanScope = rec != null && !rec.isAfter(today)
         val beforeTodayHalf = todayHalfwayRatio(beforeSnapshot, today)
-        val dayBeforeComplete = rec?.takeIf { !it.isBefore(today) }?.let { day ->
-            isPlanCompleteForDay(beforeSnapshot, today, day)
-        } ?: false
+        val workPlanCompleteBefore = isTodayWorkPlanComplete(beforeSnapshot, today)
         when {
             rec == null -> {
                 homeTodayPlanPinnedCheckedKeys.remove(pinKey)
@@ -1080,8 +1145,7 @@ class HomeActivity : AppCompatActivity() {
             }
             !rec.isAfter(today) -> {
                 if (checked) {
-                    val planEntries = collectTodayPlanEntries(homeTasksSnapshot, today)
-                        .filter { it.recommendedOn == today }
+                    val planEntries = todayPlanWorkEntries(homeTasksSnapshot, today)
                     val hasIncompleteAfter = planEntries.any { e ->
                         val toggled = e.task.id == taskId && e.stepIndex == stepIndex
                         val done = if (toggled) checked else e.step.completed
@@ -1090,7 +1154,7 @@ class HomeActivity : AppCompatActivity() {
                     val todayPlanEffectivelyCollapsed = if (hasIncompleteAfter) {
                         !homeTodayPlanExpanded
                     } else {
-                        rec.toString() !in homeCompletedReviewDaysExpanded
+                        today.toString() !in homeCompletedReviewDaysExpanded
                     }
                     if (todayPlanEffectivelyCollapsed) homeTodayPlanPinnedCheckedKeys.add(pinKey)
                 } else {
@@ -1123,7 +1187,10 @@ class HomeActivity : AppCompatActivity() {
             }
         }
         homeRoadmapPatchInFlight = true
-        steps[stepIndex] = steps[stepIndex].copy(completed = checked)
+        steps[stepIndex] = steps[stepIndex].copy(
+            completed = checked,
+            completedAt = if (checked) Instant.now().toString() else null,
+        )
         val previousStatus = task.status
         val derived = deriveStatusFromSteps(steps)
         val newRoadmap = RoadmapStep.toJsonArray(steps)
@@ -1135,7 +1202,7 @@ class HomeActivity : AppCompatActivity() {
 
         // Achievement: "First task completed" — repurposed to step-based:
         // trigger the first time the user checks off ANY step on today's plan.
-        if (userIdForAchievements != null && wasTodayStep && checked) {
+        if (userIdForAchievements != null && wasInTodayPlanScope && checked) {
             AchievementManager.ensureLoaded(token, userIdForAchievements)
             AchievementManager.maybeShowFirstTaskCompleted(this, token, userIdForAchievements)
         }
@@ -1146,34 +1213,29 @@ class HomeActivity : AppCompatActivity() {
             AchievementManager.maybeShowGettingAhead(this, token, userIdForAchievements)
         }
 
-        // Achievement: "Plan complete" (fires each time a day transitions to fully done).
+        // Achievement: "Plan complete" when everything in today's plan scope (overdue + today) is done.
         var planCompleteFired = false
-        if (rec != null && !rec.isBefore(today)) {
-            val afterComplete = isPlanCompleteForDay(homeTasksSnapshot, today, rec)
-            if (!dayBeforeComplete && afterComplete) {
-                planCompleteFired = true
-                if (userIdForProfileWrites != null) {
-                    val uid = userIdForProfileWrites
-                    val dayForPopup = rec
-                    networkExecutor.execute {
-                        val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, dayForPopup)
-                        runOnUiThread {
-                            if (!isFinishing) {
-                                AchievementManager.showPlanComplete(this@HomeActivity, dayForPopup, streak)
-                            }
+        val workPlanCompleteAfter = isTodayWorkPlanComplete(homeTasksSnapshot, today)
+        if (!workPlanCompleteBefore && workPlanCompleteAfter) {
+            planCompleteFired = true
+            if (userIdForProfileWrites != null) {
+                val uid = userIdForProfileWrites
+                networkExecutor.execute {
+                    val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, today)
+                    runOnUiThread {
+                        if (!isFinishing) {
+                            AchievementManager.showPlanComplete(this@HomeActivity, today, streak)
                         }
                     }
-                } else {
-                    AchievementManager.showPlanComplete(this, rec, 1)
                 }
-            } else if (dayBeforeComplete && !afterComplete && rec == today) {
-                // Today flipped from complete → incomplete (user unchecked something).
-                // Undo the streak write by restoring prior values from the profile backup.
-                if (userIdForProfileWrites != null) {
-                    val uid = userIdForProfileWrites
-                    networkExecutor.execute {
-                        StreakCoordinator.undoTodayCompletionIfPossible(token, uid)
-                    }
+            } else {
+                AchievementManager.showPlanComplete(this, today, 1)
+            }
+        } else if (workPlanCompleteBefore && !workPlanCompleteAfter) {
+            if (userIdForProfileWrites != null) {
+                val uid = userIdForProfileWrites
+                networkExecutor.execute {
+                    StreakCoordinator.undoTodayCompletionIfPossible(token, uid)
                 }
             }
         }
@@ -1199,14 +1261,13 @@ class HomeActivity : AppCompatActivity() {
         tasksSnapshot: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
     ): Double {
-        val todayEntries = collectTodayPlanEntries(tasksSnapshot, today)
-            .filter { it.recommendedOn == today }
-        if (todayEntries.isEmpty()) return 0.0
-        val totalSteps = todayEntries.size
-        val doneSteps = todayEntries.count { it.step.completed }
+        val workEntries = todayPlanWorkEntries(tasksSnapshot, today)
+        if (workEntries.isEmpty()) return 0.0
+        val totalSteps = workEntries.size
+        val doneSteps = workEntries.count { it.step.completed }
         var totalHours = 0.0
         var doneHours = 0.0
-        for (e in todayEntries) {
+        for (e in workEntries) {
             val h = e.step.estimatedHours ?: 0.0
             totalHours += h
             if (e.step.completed) doneHours += h
@@ -1218,19 +1279,6 @@ class HomeActivity : AppCompatActivity() {
         } else {
             0.0
         }
-    }
-
-    private fun isPlanCompleteForDay(
-        tasksSnapshot: List<SupabaseTasksApi.TaskRow>,
-        today: LocalDate,
-        day: LocalDate,
-    ): Boolean {
-        val entries = if (day.isAfter(today)) {
-            collectFuturePlanEntries(tasksSnapshot, today)
-        } else {
-            collectTodayPlanEntries(tasksSnapshot, today)
-        }.filter { it.recommendedOn == day }
-        return entries.isNotEmpty() && entries.all { it.step.completed }
     }
 
     private fun persistTodayPlanRoadmap(
@@ -1345,21 +1393,35 @@ class HomeActivity : AppCompatActivity() {
         }
 
         val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
-        if (urgent || overdue) {
-            card.setCardBackgroundColor(ContextCompat.getColor(this, R.color.home_urgent_card_fill))
-            card.strokeWidth = resources.getDimensionPixelSize(R.dimen.home_urgent_card_stroke_width)
-            card.strokeColor = ContextCompat.getColor(this, R.color.home_urgent_card_stroke)
-            duePill.setBackgroundResource(R.drawable.bg_home_due_pill_urgent)
-            duePill.setTextColor(ContextCompat.getColor(this, R.color.home_urgent_pill_text))
-        } else {
-            card.setCardBackgroundColor(
-                MaterialColors.getColor(card, com.google.android.material.R.attr.colorSurfaceVariant)
-            )
-            card.strokeWidth = 0
-            duePill.setBackgroundResource(R.drawable.bg_home_due_pill_neutral)
-            duePill.setTextColor(
-                MaterialColors.getColor(duePill, com.google.android.material.R.attr.colorOnSurfaceVariant)
-            )
+        when {
+            overdue -> {
+                // Keep the card calm; flag overdue only on the due pill.
+                card.setCardBackgroundColor(
+                    MaterialColors.getColor(card, com.google.android.material.R.attr.colorSurfaceVariant)
+                )
+                card.strokeWidth = 0
+                duePill.setBackgroundResource(R.drawable.bg_home_due_pill_overdue)
+                duePill.setTextColor(
+                    MaterialColors.getColor(duePill, com.google.android.material.R.attr.colorError)
+                )
+            }
+            urgent -> {
+                card.setCardBackgroundColor(ContextCompat.getColor(this, R.color.home_urgent_card_fill))
+                card.strokeWidth = resources.getDimensionPixelSize(R.dimen.home_urgent_card_stroke_width)
+                card.strokeColor = ContextCompat.getColor(this, R.color.home_urgent_card_stroke)
+                duePill.setBackgroundResource(R.drawable.bg_home_due_pill_urgent)
+                duePill.setTextColor(ContextCompat.getColor(this, R.color.home_urgent_pill_text))
+            }
+            else -> {
+                card.setCardBackgroundColor(
+                    MaterialColors.getColor(card, com.google.android.material.R.attr.colorSurfaceVariant)
+                )
+                card.strokeWidth = 0
+                duePill.setBackgroundResource(R.drawable.bg_home_due_pill_neutral)
+                duePill.setTextColor(
+                    MaterialColors.getColor(duePill, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                )
+            }
         }
     }
 

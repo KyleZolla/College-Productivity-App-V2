@@ -21,6 +21,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import org.json.JSONArray
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -243,7 +244,10 @@ class TaskDetailActivity : AppCompatActivity() {
         if (index < 0 || index >= roadmapSteps.size) return
         val cur = roadmapSteps[index]
         if (cur.completed == checked) return
-        roadmapSteps[index] = cur.copy(completed = checked)
+        roadmapSteps[index] = cur.copy(
+            completed = checked,
+            completedAt = if (checked) Instant.now().toString() else null,
+        )
         roadmapAdapter.submitList(roadmapSteps.toList())
         refreshRoadmapProgress()
         persistRoadmapToDatabase()
@@ -254,7 +258,7 @@ class TaskDetailActivity : AppCompatActivity() {
             AchievementManager.ensureLoaded(token, userId)
             val today = LocalDate.now()
             val rec = RoadmapStep.recommendedLocalDate(cur)
-            if (rec != null && rec == today) {
+            if (rec != null && !rec.isAfter(today)) {
                 AchievementManager.maybeShowFirstTaskCompleted(this, token, userId)
             }
             if (rec != null && rec.isAfter(today)) {

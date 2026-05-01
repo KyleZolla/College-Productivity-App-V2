@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -31,11 +32,19 @@ class TaskListAdapter(
         val due: LocalDateTime? = item.dueDate
         val dueFormatted = due?.let { DueDateTimeFormat.displayListRow(it) }
             ?: ctx.getString(R.string.due_date_not_set)
-        holder.due.text = if (DueDateHumanLabel.isOverdue(due, item.status)) {
+        val overdue = DueDateHumanLabel.isOverdue(due, item.status)
+        holder.due.text = if (overdue) {
             ctx.getString(R.string.due_overdue_was_due, dueFormatted)
         } else {
             ctx.getString(R.string.task_row_due_line, dueFormatted)
         }
+        holder.due.setTextColor(
+            if (overdue) {
+                MaterialColors.getColor(holder.due, com.google.android.material.R.attr.colorError)
+            } else {
+                MaterialColors.getColor(holder.due, com.google.android.material.R.attr.colorOnSurfaceVariant)
+            },
+        )
 
         val summary = RoadmapProgress.summarize(item.roadmap)
         if (summary.total <= 0) {
