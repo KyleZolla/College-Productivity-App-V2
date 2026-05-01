@@ -1,5 +1,6 @@
 package com.example.productivityapp
 
+import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.Context
 import android.content.Intent
@@ -16,6 +17,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import org.json.JSONArray
@@ -48,6 +50,7 @@ class TaskDetailActivity : AppCompatActivity() {
     private var roadmapSteps: MutableList<RoadmapStep> = mutableListOf()
     private var roadmapPatchInFlight = false
     private var statusPatchInFlight = false
+    private var deleteInFlight = false
 
     private var achievementsUserId: String? = null
 
@@ -85,6 +88,7 @@ class TaskDetailActivity : AppCompatActivity() {
         statusLine = findViewById(R.id.taskDetailStatusLine)
 
         editDueButton = findViewById(R.id.taskDetailEditDue)
+        findViewById<MaterialButton>(R.id.taskDetailDeleteTask).setOnClickListener { confirmDeleteTask() }
 
         roadmapProgress = findViewById(R.id.taskDetailRoadmapProgress)
         roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
@@ -100,6 +104,57 @@ class TaskDetailActivity : AppCompatActivity() {
         editDueButton?.setOnClickListener { pickDueDateTime() }
 
         fetchLatestTask()
+    }
+
+    private fun confirmDeleteTask() {
+        if (deleteInFlight) return
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.task_detail_delete_confirm_title)
+            .setMessage(R.string.task_detail_delete_confirm_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.task_detail_delete_confirm_button) { _, _ -> deleteTaskFromServer() }
+            .show()
+    }
+
+    private fun deleteTaskFromServer() {
+        if (deleteInFlight) return
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
+            return
+        }
+        deleteInFlight = true
+        val deleteBtn = findViewById<MaterialButton>(R.id.taskDetailDeleteTask)
+        deleteBtn.isEnabled = false
+        editDueButton?.isEnabled = false
+        deleteBtn.text = getString(R.string.task_detail_deleting)
+
+        networkExecutor.execute {
+            when (val result = SupabaseTasksApi.deleteTask(token, taskId)) {
+                is SupabaseTasksApi.DeleteResult.Success -> runOnUiThread {
+                    deleteInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    Toast.makeText(this, R.string.task_detail_task_deleted, Toast.LENGTH_SHORT).show()
+                    setResult(
+                        Activity.RESULT_OK,
+                        Intent().putExtra(EXTRA_RESULT_TASK_DELETED, true),
+                    )
+                    finish()
+                }
+                is SupabaseTasksApi.DeleteResult.Failure -> runOnUiThread {
+                    deleteInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    deleteBtn.isEnabled = true
+                    editDueButton?.isEnabled = true
+                    deleteBtn.text = getString(R.string.task_detail_delete_task)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.error_task_delete_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun fetchLatestTask() {
@@ -403,6 +458,8 @@ class TaskDetailActivity : AppCompatActivity() {
         const val EXTRA_TASK_DUE_DISPLAY = "extra_task_due_display"
         const val EXTRA_TASK_DUE_ISO = "extra_task_due_iso"
         const val EXTRA_TASK_STATUS = "extra_task_status"
+        /** Set on the result Intent when the task row was removed in Supabase. */
+        const val EXTRA_RESULT_TASK_DELETED = "extra_result_task_deleted"
 
         fun createIntent(context: Context, task: SupabaseTasksApi.TaskRow): Intent {
             val dueDisplay = task.dueDate?.let { DueDateTimeFormat.displayFull(it) }

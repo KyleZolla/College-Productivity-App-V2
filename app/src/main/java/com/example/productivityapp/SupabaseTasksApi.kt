@@ -68,6 +68,24 @@ object SupabaseTasksApi {
         data class Failure(val message: String) : PatchRoadmapResult()
     }
 
+    sealed class DeleteResult {
+        object Success : DeleteResult()
+        data class Failure(val message: String) : DeleteResult()
+    }
+
+    private fun parseError(body: String, code: Int): String {
+        return try {
+            val root = JSONObject(body)
+            root.optString("message")
+                .ifBlank { root.optString("error_description") }
+                .ifBlank { root.optString("hint") }
+                .ifBlank { root.optString("details") }
+                .ifBlank { "Request failed ($code)" }
+        } catch (_: Exception) {
+            if (body.isBlank()) "Request failed ($code)" else body
+        }
+    }
+
     fun listTasks(accessToken: String, filter: TaskListFilter = TaskListFilter.ACTIVE): ListResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return ListResult.Failure("Missing Supabase config.")
@@ -147,6 +165,61 @@ object SupabaseTasksApi {
                         else -> null
                     }
                 }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseDueFromPatchResponse(body: String): LocalDateTime? {
+        if (body.isBlank()) return null
+        return try {
+            val trimmed = body.trim()
+            val rawDue: Any? = when {
+                trimmed.startsWith("[") -> {
+                    val arr = JSONArray(trimmed)
+                    if (arr.length() == 0) return null
+                    val row = arr.getJSONObject(0)
+                    if (!row.has("dueDate") || row.isNull("dueDate")) null else row.get("dueDate")
+                }
+                trimmed.startsWith("{") -> {
+                    val row = JSONObject(trimmed)
+                    if (!row.has("dueDate") || row.isNull("dueDate")) null else row.get("dueDate")
+                }
+                else -> null
+            }
+            parseDueDate(rawDue)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseStatusFromPatchResponse(body: String): TaskStatus? {
+        if (body.isBlank()) return null
+        return try {
+            val trimmed = body.trim()
+            when {
+                trimmed.startsWith("[") -> {
+                    val arr = JSONArray(trimmed)
+                    if (arr.length() == 0) return null
+                    val row = arr.getJSONObject(0)
+                    TaskStatus.fromApi(
+                        when {
+                            !row.has("status") || row.isNull("status") -> null
+                            else -> row.getString("status")
+                        }
+                    )
+                }
+                trimmed.startsWith("{") -> {
+                    val row = JSONObject(trimmed)
+                    TaskStatus.fromApi(
+                        when {
+                            !row.has("status") || row.isNull("status") -> null
+                            else -> row.getString("status")
+                        }
+                    )
+                }
+                else -> null
             }
         } catch (_: Exception) {
             null
@@ -307,38 +380,6 @@ object SupabaseTasksApi {
         }
     }
 
-    private fun parseStatusFromPatchResponse(body: String): TaskStatus? {
-        if (body.isBlank()) return null
-        return try {
-            val trimmed = body.trim()
-            when {
-                trimmed.startsWith("[") -> {
-                    val arr = JSONArray(trimmed)
-                    if (arr.length() == 0) return null
-                    val row = arr.getJSONObject(0)
-                    TaskStatus.fromApi(
-                        when {
-                            !row.has("status") || row.isNull("status") -> null
-                            else -> row.getString("status")
-                        }
-                    )
-                }
-                trimmed.startsWith("{") -> {
-                    val row = JSONObject(trimmed)
-                    TaskStatus.fromApi(
-                        when {
-                            !row.has("status") || row.isNull("status") -> null
-                            else -> row.getString("status")
-                        }
-                    )
-                }
-                else -> null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     fun updateTaskDueDate(accessToken: String, taskId: String, dueDate: LocalDateTime?): PatchDueResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return PatchDueResult.Failure("Missing Supabase config.")
@@ -432,39 +473,53 @@ object SupabaseTasksApi {
         }
     }
 
-    private fun parseDueFromPatchResponse(body: String): LocalDateTime? {
-        if (body.isBlank()) return null
-        return try {
-            val trimmed = body.trim()
-            val rawDue: Any? = when {
-                trimmed.startsWith("[") -> {
-                    val arr = JSONArray(trimmed)
-                    if (arr.length() == 0) return null
-                    val row = arr.getJSONObject(0)
-                    if (!row.has("dueDate") || row.isNull("dueDate")) null else row.get("dueDate")
-                }
-                trimmed.startsWith("{") -> {
-                    val row = JSONObject(trimmed)
-                    if (!row.has("dueDate") || row.isNull("dueDate")) null else row.get("dueDate")
-                }
-                else -> null
-            }
-            parseDueDate(rawDue)
-        } catch (_: Exception) {
-            null
+    fun deleteTask(accessToken: String, taskId: String): DeleteResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return DeleteResult.Failure("Missing Supabase config.")
         }
-    }
-
-    private fun parseError(body: String, code: Int): String {
+        val idFilter = taskId.trim()
+        if (idFilter.isEmpty()) return DeleteResult.Failure("Missing task id.")
         return try {
-            val root = JSONObject(body)
-            root.optString("message")
-                .ifBlank { root.optString("error_description") }
-                .ifBlank { root.optString("hint") }
-                .ifBlank { root.optString("details") }
-                .ifBlank { "Request failed ($code)" }
-        } catch (_: Exception) {
-            if (body.isBlank()) "Request failed ($code)" else body
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val enc = URLEncoder.encode(idFilter, StandardCharsets.UTF_8.name())
+            val url = URL("$base/rest/v1/tasks?id=eq.$enc")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "DELETE"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+            // So we can tell “no row matched / RLS hid the row” from a real delete (PostgREST returns []).
+            connection.setRequestProperty("Prefer", "return=representation")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode !in 200..299) {
+                DeleteResult.Failure(parseError(responseBody, responseCode))
+            } else {
+                val trimmed = responseBody.trim()
+                when {
+                    trimmed.startsWith("[") -> {
+                        val arr = JSONArray(trimmed)
+                        when (arr.length()) {
+                            0 -> DeleteResult.Failure(
+                                "No row was deleted. Check that your Supabase RLS policy allows DELETE on tasks you own.",
+                            )
+                            else -> DeleteResult.Success
+                        }
+                    }
+                    // 204 No Content or unexpected empty success — treat as success for compatibility.
+                    trimmed.isEmpty() -> DeleteResult.Success
+                    else -> DeleteResult.Success
+                }
+            }
+        } catch (e: Exception) {
+            DeleteResult.Failure(e.message ?: "Network error.")
         }
     }
 }

@@ -99,7 +99,7 @@ object AchievementManager {
         }
     }
 
-    fun showPlanComplete(activity: Activity, day: LocalDate) {
+    fun showPlanComplete(activity: Activity, day: LocalDate, streak: Int) {
         val today = LocalDate.now()
         val title = when {
             day == today -> "Today's Plan Crushed!"
@@ -109,11 +109,17 @@ object AchievementManager {
                 "${dow}'s Plan Crushed!"
             }
         }
+        val message = if (day == today) {
+            val safeStreak = streak.coerceAtLeast(1)
+            "Day complete! You're on a 🔥 $safeStreak day streak!"
+        } else {
+            "You finished everything on your list for that day. 🔥"
+        }
         AchievementPopup.show(
             activity = activity,
             emoji = "🔥",
             title = title,
-            message = "You finished everything on your list for that day. 🔥",
+            message = message,
         )
     }
 }

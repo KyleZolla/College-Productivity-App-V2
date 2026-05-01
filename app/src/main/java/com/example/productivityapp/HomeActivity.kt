@@ -1,5 +1,6 @@
 package com.example.productivityapp
 
+import android.app.Activity
 import android.content.Intent
 import android.graphics.Paint
 import android.os.Bundle
@@ -11,6 +12,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -34,6 +36,19 @@ import kotlin.math.roundToInt
 class HomeActivity : AppCompatActivity() {
 
     private enum class Tab { Home, Tasks, Profile }
+
+    private val openTaskDetailLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        if (result.data?.getBooleanExtra(TaskDetailActivity.EXTRA_RESULT_TASK_DELETED, false) != true) {
+            return@registerForActivityResult
+        }
+        if (SessionManager.getAccessToken(this).isNullOrBlank()) return@registerForActivityResult
+        refreshHomeHeader()
+        loadHomeUpcoming(showLoading = false)
+        loadTasks(showLoading = false)
+    }
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private var currentTab: Tab = Tab.Home
@@ -210,6 +225,7 @@ class HomeActivity : AppCompatActivity() {
                 achievementsUserId = SupabaseUserId.resolveUserId(token)
                 achievementsUserId?.let { AchievementManager.ensureLoaded(token, it) }
             }
+            maybeShowStreakOnAppLaunch(token)
             // Keep home cards and task list aligned with Supabase (e.g. after status edit on detail).
             when (currentTab) {
                 Tab.Home -> loadTasks(showLoading = false)
@@ -886,8 +902,22 @@ class HomeActivity : AppCompatActivity() {
             val check = row.findViewById<MaterialCheckBox>(R.id.homeTodayPlanStepCheck)
             val title = row.findViewById<TextView>(R.id.homeTodayPlanStepTitle)
             val meta = row.findViewById<TextView>(R.id.homeTodayPlanStepMeta)
+            val stepDay = RoadmapStep.recommendedLocalDate(entry.step)
+            val isOverdue = stepDay != null && stepDay.isBefore(LocalDate.now()) && !entry.step.completed
             title.text = entry.step.title
-            meta.text = formatTodayPlanStepMeta(entry.step)
+            val baseMeta = formatTodayPlanStepMeta(entry.step)
+            meta.text = if (isOverdue) {
+                getString(R.string.home_today_plan_due_overdue) + " · " + baseMeta
+            } else {
+                baseMeta
+            }
+            meta.setTextColor(
+                if (isOverdue) {
+                    MaterialColors.getColor(meta, com.google.android.material.R.attr.colorError)
+                } else {
+                    MaterialColors.getColor(meta, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                }
+            )
             check.setOnCheckedChangeListener(null)
             check.isChecked = entry.step.completed
             check.setOnCheckedChangeListener { _, checked ->
@@ -910,9 +940,29 @@ class HomeActivity : AppCompatActivity() {
         homeTodayPlanSection.visibility = View.VISIBLE
         val today = LocalDate.now()
         val entries = collectTodayPlanEntries(allActiveTasks, today)
+        // Show overdue (unchecked) steps + today's steps.
         val todayEntries = entries.filter { it.recommendedOn == today }
-        bindTodayPlanProgress(todayEntries)
-        val hasIncomplete = todayEntries.any { !it.step.completed }
+        val overdueEntries = entries.filter { it.recommendedOn.isBefore(today) && !it.step.completed }
+        // Overdue first, then today's items; keep stable order after sorting.
+        val displayEntries = overdueEntries + todayEntries
+        if (displayEntries.isEmpty()) {
+            homeTodayPlanProgressBlock.visibility = View.GONE
+        } else {
+            homeTodayPlanProgressBlock.visibility = View.VISIBLE
+            // Since we can include overdue steps, use the generic summary (not "done today").
+            bindPlanProgress(
+                entries = displayEntries,
+                stepsSummary = homeTodayPlanStepsSummary,
+                hoursSummary = homeTodayPlanHoursSummary,
+                hoursProgress = homeTodayPlanHoursProgress,
+                stepsSummaryRes = if (overdueEntries.isEmpty()) {
+                    R.string.home_today_plan_steps_summary
+                } else {
+                    R.string.home_plan_steps_summary
+                },
+            )
+        }
+        val hasIncomplete = displayEntries.any { !it.step.completed }
         if (!hasIncomplete) {
             val getAheadVisible = bindGetAheadSection(allActiveTasks, today)
             val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
@@ -921,7 +971,7 @@ class HomeActivity : AppCompatActivity() {
             homeTodayPlanGroups.visibility = View.GONE
             homeTodayPlanGroups.removeAllViews()
             val reviewDays = buildCompletedReviewDays(
-                todayEntries,
+                displayEntries,
                 futureEntries,
                 today,
                 getAheadVisible,
@@ -949,8 +999,8 @@ class HomeActivity : AppCompatActivity() {
         } else {
             homeTodayPlanEmpty.visibility = View.GONE
             homeTodayPlanGroups.visibility = View.VISIBLE
-            val sorted = sortTodayPlanEntries(todayEntries, today)
-            val collapsedVisible = buildCollapsedVisibleEntries(todayEntries, today)
+            val sorted = sortTodayPlanEntries(displayEntries, today)
+            val collapsedVisible = buildCollapsedVisibleEntries(displayEntries, today)
             val visibleEntries = if (homeTodayPlanExpanded) sorted else collapsedVisible
             val showToggle = homeTodayPlanExpanded || collapsedVisible.size < sorted.size
             homeTodayPlanToggle.visibility = if (showToggle) View.VISIBLE else View.GONE
@@ -1096,8 +1146,21 @@ class HomeActivity : AppCompatActivity() {
         if (rec != null && !rec.isBefore(today)) {
             val afterComplete = isPlanCompleteForDay(homeTasksSnapshot, today, rec)
             if (!dayBeforeComplete && afterComplete) {
-                AchievementManager.showPlanComplete(this, rec)
                 planCompleteFired = true
+                if (userIdForAchievements != null) {
+                    val uid = userIdForAchievements
+                    val dayForPopup = rec
+                    networkExecutor.execute {
+                        val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, dayForPopup)
+                        runOnUiThread {
+                            if (!isFinishing) {
+                                AchievementManager.showPlanComplete(this@HomeActivity, dayForPopup, streak)
+                            }
+                        }
+                    }
+                } else {
+                    AchievementManager.showPlanComplete(this, rec, 1)
+                }
             }
         }
 
@@ -1287,7 +1350,35 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun openTaskDetail(task: SupabaseTasksApi.TaskRow) {
-        startActivity(TaskDetailActivity.createIntent(this, task))
+        openTaskDetailLauncher.launch(TaskDetailActivity.createIntent(this, task))
+    }
+
+    private fun maybeShowStreakOnAppLaunch(token: String) {
+        synchronized(streakLaunchLock) {
+            if (streakLaunchPopupShownThisProcess) return
+        }
+        networkExecutor.execute {
+            val uid = achievementsUserId ?: SupabaseUserId.resolveUserId(token) ?: return@execute
+            when (val r = SupabaseProfilesApi.get(token, uid)) {
+                is SupabaseProfilesApi.GetResult.Success -> {
+                    if (r.row.currentStreak < 2) return@execute
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        synchronized(streakLaunchLock) {
+                            if (streakLaunchPopupShownThisProcess) return@runOnUiThread
+                            streakLaunchPopupShownThisProcess = true
+                        }
+                        AchievementPopup.show(
+                            activity = this,
+                            emoji = "🔥",
+                            title = "Hey!",
+                            message = "You're on a 🔥 ${r.row.currentStreak} day streak! Keep it up!",
+                        )
+                    }
+                }
+                else -> Unit
+            }
+        }
     }
 
     private fun loadTasks(showLoading: Boolean = true) {
@@ -1342,6 +1433,9 @@ class HomeActivity : AppCompatActivity() {
     }
 
     companion object {
+        private val streakLaunchLock = Any()
+        private var streakLaunchPopupShownThisProcess = false
+
         const val EXTRA_SELECTED_TAB = "selected_tab"
         const val TAB_HOME = "home"
         const val TAB_TASKS = "tasks"

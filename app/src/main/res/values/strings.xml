@@ -95,6 +95,13 @@
     <string name="task_detail_saving_status">Saving…</string>
     <string name="task_detail_status_saved">Status saved.</string>
     <string name="error_task_status_update_failed">Could not update status.</string>
+    <string name="task_detail_delete_task">Delete task</string>
+    <string name="task_detail_delete_confirm_title">Delete this task?</string>
+    <string name="task_detail_delete_confirm_message">This removes the task and its roadmap. This can’t be undone.</string>
+    <string name="task_detail_delete_confirm_button">Delete</string>
+    <string name="task_detail_deleting">Deleting…</string>
+    <string name="task_detail_task_deleted">Task deleted.</string>
+    <string name="error_task_delete_failed">Could not delete task.</string>
     <string name="task_detail_edit_due">Edit due date &amp; time</string>
     <string name="task_detail_save_due">Save due date</string>
     <string name="task_detail_saving_due">Saving…</string>

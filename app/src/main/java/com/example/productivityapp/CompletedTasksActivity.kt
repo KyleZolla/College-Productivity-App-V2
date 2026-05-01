@@ -1,11 +1,13 @@
 package com.example.productivityapp
 
+import android.app.Activity
 import android.os.Bundle
 import android.view.View
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -15,6 +17,15 @@ import com.google.android.material.appbar.MaterialToolbar
 import java.util.concurrent.Executors
 
 class CompletedTasksActivity : AppCompatActivity() {
+
+    private val taskDetailLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        if (result.data?.getBooleanExtra(TaskDetailActivity.EXTRA_RESULT_TASK_DELETED, false) == true) {
+            loadCompletedTasks()
+        }
+    }
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private lateinit var recyclerView: RecyclerView
@@ -41,7 +52,7 @@ class CompletedTasksActivity : AppCompatActivity() {
         loading = findViewById(R.id.completedTasksLoading)
         recyclerView.layoutManager = LinearLayoutManager(this)
         adapter = TaskListAdapter { task ->
-            startActivity(TaskDetailActivity.createIntent(this, task))
+            taskDetailLauncher.launch(TaskDetailActivity.createIntent(this, task))
         }
         recyclerView.adapter = adapter
     }
