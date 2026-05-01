@@ -141,6 +141,9 @@ class HomeActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tasksViewCompletedButton).setOnClickListener {
             startActivity(Intent(this, CompletedTasksActivity::class.java))
         }
+        findViewById<TextView>(R.id.tasksViewDeletedButton).setOnClickListener {
+            startActivity(Intent(this, DeletedTasksActivity::class.java))
+        }
 
         homeDateLine = findViewById(R.id.homeDateLine)
         homeGreetingLine = findViewById(R.id.homeGreetingLine)

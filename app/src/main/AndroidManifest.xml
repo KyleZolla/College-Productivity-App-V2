@@ -41,6 +41,9 @@
             android:name=".CompletedTasksActivity"
             android:exported="false" />
         <activity
+            android:name=".DeletedTasksActivity"
+            android:exported="false" />
+        <activity
             android:name=".LoginActivity"
             android:exported="false" />
         <activity

@@ -115,9 +115,13 @@
     <string name="error_task_create_failed">Could not create task.</string>
     <string name="tasks_screen_heading">Your tasks</string>
     <string name="tasks_view_completed">Completed tasks →</string>
+    <string name="tasks_view_deleted">Deleted tasks →</string>
     <string name="tasks_completed_title">Completed tasks</string>
     <string name="tasks_completed_empty">No completed tasks yet.</string>
     <string name="tasks_completed_load_failed">Could not load completed tasks.</string>
+    <string name="tasks_deleted_title">Deleted tasks</string>
+    <string name="tasks_deleted_empty">No deleted tasks.</string>
+    <string name="tasks_deleted_load_failed">Could not load deleted tasks.</string>
     <string name="tasks_empty">No tasks yet.\nTap + to add one.</string>
     <string name="task_row_due_line">Due %1$s</string>
     <string name="due_overdue_was_due">Overdue — was due %1$s</string>

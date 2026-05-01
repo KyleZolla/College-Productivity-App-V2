@@ -342,6 +342,19 @@
                 android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
                 android:textColor="?attr/colorPrimary" />
 
+            <TextView
+                android:id="@+id/tasksViewDeletedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingVertical="6dp"
+                android:text="@string/tasks_view_deleted"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                android:textColor="?attr/colorPrimary" />
+
             <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="0dp"

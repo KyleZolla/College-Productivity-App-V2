@@ -14,6 +14,8 @@ enum class TaskListFilter {
     ACTIVE,
     /** Only status Complete. */
     COMPLETED,
+    /** Tasks that have been soft-deleted (deletedAt is not null). */
+    DELETED,
     /**
      * Completed tasks that still have roadmap JSON (non-null).
      * Used with [ACTIVE] on home so “review completed” days still list fully-done tasks.
@@ -97,13 +99,21 @@ object SupabaseTasksApi {
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
             val enc = { s: String -> URLEncoder.encode(s, StandardCharsets.UTF_8.name()) }
-            val statusParam = when (filter) {
-                TaskListFilter.ACTIVE -> "status=neq.${enc(TaskStatus.COMPLETE.apiValue)}"
-                TaskListFilter.COMPLETED -> "status=eq.${enc(TaskStatus.COMPLETE.apiValue)}"
+            val filterParams = when (filter) {
+                TaskListFilter.ACTIVE ->
+                    "deletedAt=is.null&status=neq.${enc(TaskStatus.COMPLETE.apiValue)}"
+                TaskListFilter.COMPLETED ->
+                    "deletedAt=is.null&status=eq.${enc(TaskStatus.COMPLETE.apiValue)}"
+                TaskListFilter.DELETED ->
+                    "deletedAt=not.is.null"
                 TaskListFilter.COMPLETED_WITH_ROADMAP ->
-                    "status=eq.${enc(TaskStatus.COMPLETE.apiValue)}&roadmap=not.is.null"
+                    "deletedAt=is.null&status=eq.${enc(TaskStatus.COMPLETE.apiValue)}&roadmap=not.is.null"
             }
-            val query = "select=id,title,dueDate,status,roadmap&$statusParam&order=dueDate.asc.nullslast"
+            val orderParam = when (filter) {
+                TaskListFilter.DELETED -> "order=deletedAt.desc.nullslast"
+                else -> "order=dueDate.asc.nullslast"
+            }
+            val query = "select=id,title,dueDate,status,roadmap&$filterParams&$orderParam"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -473,6 +483,9 @@ object SupabaseTasksApi {
         }
     }
 
+    /**
+     * Soft delete: set `deletedAt` to an ISO-8601 timestamptz string (UTC, includes timezone).
+     */
     fun deleteTask(accessToken: String, taskId: String): DeleteResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return DeleteResult.Failure("Missing Supabase config.")
@@ -484,14 +497,21 @@ object SupabaseTasksApi {
             val enc = URLEncoder.encode(idFilter, StandardCharsets.UTF_8.name())
             val url = URL("$base/rest/v1/tasks?id=eq.$enc")
             val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "DELETE"
+            connection.requestMethod = "PATCH"
             connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
             connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Accept", "application/json")
-            // So we can tell “no row matched / RLS hid the row” from a real delete (PostgREST returns []).
+            // So we can tell “no row matched / RLS hid the row” from a real update (PostgREST returns []).
             connection.setRequestProperty("Prefer", "return=representation")
             connection.connectTimeout = 20000
             connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject().put("deletedAt", Instant.now().toString())
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
 
             val responseCode = connection.responseCode
             val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
@@ -508,7 +528,7 @@ object SupabaseTasksApi {
                         val arr = JSONArray(trimmed)
                         when (arr.length()) {
                             0 -> DeleteResult.Failure(
-                                "No row was deleted. Check that your Supabase RLS policy allows DELETE on tasks you own.",
+                                "No row was updated. Check that your Supabase RLS policy allows UPDATE on tasks you own.",
                             )
                             else -> DeleteResult.Success
                         }
