@@ -48,6 +48,7 @@
     <string name="home_today_plan_see_full">See full plan</string>
     <string name="home_today_plan_show_less">Show less</string>
     <string name="home_today_plan_view_completed">View what you completed</string>
+    <string name="home_today_plan_view_completed_count">View what you completed (%1$d)</string>
     <string name="home_today_plan_view_completed_ahead">See what you finished early</string>
     <string name="home_get_ahead_label">Get ahead</string>
     <string name="home_get_ahead_next_day">Next: %1$s</string>

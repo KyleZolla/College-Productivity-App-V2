@@ -54,6 +54,7 @@ class TaskDetailActivity : AppCompatActivity() {
     private var deleteInFlight = false
 
     private var achievementsUserId: String? = null
+    private var activeTasksSnapshot: List<SupabaseTasksApi.TaskRow> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -162,6 +163,7 @@ class TaskDetailActivity : AppCompatActivity() {
         val token = SessionManager.getAccessToken(this) ?: return
         achievementsUserId = SupabaseUserId.resolveUserId(token)?.also { AchievementManager.ensureLoaded(token, it) }
         networkExecutor.execute {
+            val activeTasksResult = SupabaseTasksApi.listTasks(token, TaskListFilter.ACTIVE)
             when (val result = SupabaseTasksApi.getTask(token, taskId)) {
                 is SupabaseTasksApi.GetResult.Failure -> runOnUiThread {
                     if (isFinishing) return@runOnUiThread
@@ -169,6 +171,9 @@ class TaskDetailActivity : AppCompatActivity() {
                 }
                 is SupabaseTasksApi.GetResult.Success -> runOnUiThread {
                     if (isFinishing) return@runOnUiThread
+                    if (activeTasksResult is SupabaseTasksApi.ListResult.Success) {
+                        activeTasksSnapshot = activeTasksResult.tasks
+                    }
                     savedStatus = result.task.status
                     refreshStatusLine(savedStatus)
                     savedDue = result.task.dueDate
@@ -244,6 +249,9 @@ class TaskDetailActivity : AppCompatActivity() {
         if (index < 0 || index >= roadmapSteps.size) return
         val cur = roadmapSteps[index]
         if (cur.completed == checked) return
+        val today = LocalDate.now()
+        val tasksBefore = activeTasksSnapshot
+        val hadOverdueBefore = TodayPlanWork.hasIncompleteOverdueSteps(tasksBefore, today)
         roadmapSteps[index] = cur.copy(
             completed = checked,
             completedAt = if (checked) Instant.now().toString() else null,
@@ -252,11 +260,16 @@ class TaskDetailActivity : AppCompatActivity() {
         refreshRoadmapProgress()
         persistRoadmapToDatabase()
 
+        val derived = deriveStatusFromSteps(roadmapSteps)
+        val newRoadmap = RoadmapStep.toJsonArray(roadmapSteps)
+        activeTasksSnapshot = activeTasksSnapshot.map { row ->
+            if (row.id == taskId) row.copy(roadmap = newRoadmap, status = derived) else row
+        }
+
         val token = SessionManager.getAccessToken(this)
         val userId = token?.let { achievementsUserId ?: SupabaseUserId.resolveUserId(it) }
         if (token != null && userId != null && checked) {
             AchievementManager.ensureLoaded(token, userId)
-            val today = LocalDate.now()
             val rec = RoadmapStep.recommendedLocalDate(cur)
             if (rec != null && !rec.isAfter(today)) {
                 AchievementManager.maybeShowFirstTaskCompleted(this, token, userId)
@@ -266,7 +279,13 @@ class TaskDetailActivity : AppCompatActivity() {
             }
         }
 
-        val derived = deriveStatusFromSteps(roadmapSteps)
+        if (checked && hadOverdueBefore) {
+            val hasOverdueAfter = TodayPlanWork.hasIncompleteOverdueSteps(activeTasksSnapshot, today)
+            if (!hasOverdueAfter) {
+                AchievementManager.showAllCaughtUp(this)
+            }
+        }
+
         if (derived != savedStatus) {
             persistDerivedStatus(derived)
         }

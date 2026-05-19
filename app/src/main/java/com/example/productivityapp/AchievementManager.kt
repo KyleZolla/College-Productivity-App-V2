@@ -137,6 +137,15 @@ object AchievementManager {
         }
     }
 
+    fun showAllCaughtUp(activity: Activity) {
+        AchievementPopup.show(
+            activity = activity,
+            emoji = "✨",
+            title = "All Caught Up!",
+            message = "You cleared your overdue work. Back on track!",
+        )
+    }
+
     fun showPlanComplete(activity: Activity, day: LocalDate, streak: Int) {
         val today = LocalDate.now()
         val title = when {
