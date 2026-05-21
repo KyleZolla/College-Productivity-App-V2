@@ -1,5 +1,6 @@
 package com.example.productivityapp
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -7,6 +8,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -22,12 +24,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var confirmPasswordInput: EditText
     private lateinit var statusText: TextView
     private var signUpRequestInFlight = false
+    private var pendingHomeRedirect = false
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { _ ->
+        if (pendingHomeRedirect) {
+            navigateToHome()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (SessionManager.isLoggedIn(this)) {
-            startActivity(Intent(this, HomeActivity::class.java))
-            finish()
+        val redirectToHome = SessionManager.isLoggedIn(this)
+        if (NotificationPermissionHelper.shouldRequestOnFirstLaunch(this)) {
+            pendingHomeRedirect = redirectToHome
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            if (redirectToHome) return
+        } else if (redirectToHome) {
+            navigateToHome()
             return
         }
         enableEdgeToEdge()
@@ -71,6 +86,11 @@ class MainActivity : AppCompatActivity() {
         googleSignInButton.setOnClickListener {
             launchGoogleOAuth(statusText)
         }
+    }
+
+    private fun navigateToHome() {
+        startActivity(Intent(this, HomeActivity::class.java))
+        finish()
     }
 
     override fun onDestroy() {
@@ -196,6 +216,7 @@ class MainActivity : AppCompatActivity() {
                         val (accessToken, refreshToken, expiresIn) = extractSessionFromSignupEnvelope(envelope)
                         if (accessToken.isNotBlank()) {
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
+                            FcmTokenRegistrar.syncIfLoggedIn(this)
                             val intent = Intent(this, HomeActivity::class.java)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                             startActivity(intent)

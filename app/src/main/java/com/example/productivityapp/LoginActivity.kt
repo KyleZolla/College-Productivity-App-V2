@@ -134,6 +134,7 @@ class LoginActivity : AppCompatActivity() {
                         val expiresIn = if (payload.has("expires_in")) payload.optLong("expires_in") else null
                         if (accessToken.isNotBlank()) {
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
+                            FcmTokenRegistrar.syncIfLoggedIn(this)
                         }
                         val successMessage = getString(R.string.status_login_success)
                         statusText.showAuthMessage(successMessage, AuthMessageTone.SUCCESS)

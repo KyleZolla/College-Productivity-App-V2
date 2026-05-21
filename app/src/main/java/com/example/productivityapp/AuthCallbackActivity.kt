@@ -23,6 +23,7 @@ class AuthCallbackActivity : AppCompatActivity() {
         if (!accessToken.isNullOrBlank()) {
             val expiresIn = fragmentParams["expires_in"]?.toLongOrNull()
             SessionManager.saveSession(this, accessToken, refreshToken.orEmpty(), expiresIn)
+            FcmTokenRegistrar.syncIfLoggedIn(this)
         }
 
         val destination = if (!accessToken.isNullOrBlank() || !authCode.isNullOrBlank()) {

@@ -213,6 +213,7 @@ class HomeActivity : AppCompatActivity() {
         }
 
         applyRequestedTab(intent)
+        FcmTokenRegistrar.syncIfLoggedIn(this)
     }
 
     override fun onResume() {
