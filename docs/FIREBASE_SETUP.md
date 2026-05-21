@@ -26,3 +26,19 @@ The old API key may still exist in **git history**. Do both:
    git commit -m "Stop tracking google-services.json; use local Firebase config"
    ```
 3. **Optional — scrub history** so the old key is not in past commits: use [GitHub’s guide](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) or `git filter-repo`. Rotating the key is usually enough if the new key is restricted.
+
+## If push notifications stopped after locking the API key
+
+**Application restrictions** (Android app + package + SHA-1) are correct — keep those.
+
+**API restrictions** often break FCM. In Google Cloud → **Credentials** → your Android API key → **Edit**:
+
+- Set **API restrictions** to **Don’t restrict key**, **or**
+- **Restrict key** and enable at least:
+  - Firebase Cloud Messaging API
+  - Firebase Installations API
+  - FCM Registration API
+
+Save, then **rebuild and reinstall** the app, open it while logged in (refreshes the device token).
+
+In Android Studio **Logcat**, filter `FcmTokenRegistrar` — if you see `FCM token fetch failed`, the key restrictions are still wrong.

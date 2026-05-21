@@ -1,6 +1,7 @@
 package com.example.productivityapp
 
 import android.content.Context
+import android.util.Log
 import com.google.firebase.messaging.FirebaseMessaging
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -11,6 +12,8 @@ import java.util.concurrent.Executors
 
 object FcmTokenRegistrar {
 
+    private const val TAG = "FcmTokenRegistrar"
+
     private val executor = Executors.newSingleThreadExecutor()
 
     /** Fetch the device FCM token and save it when a session exists. */
@@ -18,10 +21,15 @@ object FcmTokenRegistrar {
         if (!SessionManager.isLoggedIn(context)) return
         FirebaseMessaging.getInstance().token
             .addOnCompleteListener { task ->
-                if (!task.isSuccessful) return@addOnCompleteListener
+                if (!task.isSuccessful) {
+                    Log.e(TAG, "FCM token fetch failed", task.exception)
+                    return@addOnCompleteListener
+                }
                 val token = task.result?.trim().orEmpty()
                 if (token.isNotEmpty()) {
                     saveToken(context.applicationContext, token)
+                } else {
+                    Log.w(TAG, "FCM token fetch returned empty")
                 }
             }
     }
@@ -56,7 +64,12 @@ object FcmTokenRegistrar {
                 val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
                 connection.setFixedLengthStreamingMode(bodyBytes.size)
                 connection.outputStream.use { it.write(bodyBytes) }
-                connection.responseCode
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    Log.e(TAG, "Failed to save FCM token to profile: HTTP $code")
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "Failed to save FCM token to profile", e)
             }
         }
     }
