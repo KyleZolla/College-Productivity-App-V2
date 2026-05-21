@@ -58,6 +58,10 @@ object DueDateHumanLabel {
         }
     }
 
+    /** Date/time detail for overdue tasks when the pill already says "Overdue". */
+    fun wasDueDetail(context: Context, due: LocalDateTime): String =
+        context.getString(R.string.due_was_due_on, DueDateTimeFormat.displayListRow(due))
+
     /**
      * Short "Due …" phrase for compact UI (no clock time), e.g. combined with hour estimates.
      */

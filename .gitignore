@@ -14,6 +14,10 @@
 .cxx
 local.properties
 
+# Firebase client config (contains API keys). Copy from app/google-services.json.example
+# and download the real file from Firebase Console — see docs/FIREBASE_SETUP.md
+app/google-services.json
+
 # Logs
 logs
 *.log

@@ -128,6 +128,7 @@
     <string name="tasks_empty">No tasks yet.\nTap + to add one.</string>
     <string name="task_row_due_line">Due %1$s</string>
     <string name="due_overdue_was_due">Overdue — was due %1$s</string>
+    <string name="due_was_due_on">Was due %1$s</string>
     <string name="error_tasks_load_failed">Could not load tasks.</string>
     <string name="due_relative_today">Today</string>
     <string name="due_relative_tomorrow">Tomorrow</string>

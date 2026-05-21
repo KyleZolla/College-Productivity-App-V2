@@ -1450,9 +1450,16 @@ class HomeActivity : AppCompatActivity() {
         val statusLine = root.findViewById<TextView>(R.id.homeCardStatus)
         val progress = root.findViewById<ProgressBar>(R.id.homeCardProgress)
 
+        val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
+
         title.text = task.title
-        duePill.text = DueDateHumanLabel.format(this, task.dueDate, today, task.status)
-        statusLine.text = TaskStatusUi.label(task.status)
+        duePill.text = DueDateHumanLabel.compactDuePhrase(this, task.dueDate, today, task.status)
+        val statusLabel = TaskStatusUi.label(task.status)
+        statusLine.text = if (overdue && task.dueDate != null) {
+            "$statusLabel · ${DueDateHumanLabel.wasDueDetail(this, task.dueDate)}"
+        } else {
+            statusLabel
+        }
 
         val summary = RoadmapProgress.summarize(task.roadmap)
         if (summary.total <= 0) {
@@ -1461,8 +1468,6 @@ class HomeActivity : AppCompatActivity() {
             progress.visibility = View.VISIBLE
             progress.progress = summary.percent
         }
-
-        val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
         when {
             overdue -> {
                 // Keep the card calm; flag overdue only on the due pill.
