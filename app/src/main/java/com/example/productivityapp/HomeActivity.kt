@@ -101,6 +101,8 @@ class HomeActivity : AppCompatActivity() {
     private var homeTodayPlanExpanded = false
     private val homeCompletedReviewDaysExpanded = mutableSetOf<String>()
     private val homeTodayPlanPinnedCheckedKeys = mutableSetOf<String>()
+    /** Simple tasks marked complete via Today's Plan today (session); keeps them in the plan after reload. */
+    private val homeSimpleCompletedTodayIds = mutableSetOf<String>()
     private var homeGetAheadFocusDate: LocalDate? = null
     private val homeGetAheadPinnedCheckedKeys = mutableSetOf<String>()
     private lateinit var homeUpcomingEmpty: TextView
@@ -139,7 +141,9 @@ class HomeActivity : AppCompatActivity() {
         tasksEmptyView = findViewById(R.id.tasksEmptyView)
         tasksLoading = findViewById(R.id.tasksLoading)
         tasksRecyclerView.layoutManager = LinearLayoutManager(this)
-        tasksAdapter = TaskListAdapter { task -> openTaskDetail(task) }
+        tasksAdapter = TaskListAdapter(
+            onSimpleTaskToggled = { task, checked -> onSimpleTaskToggled(task, checked) },
+        ) { task -> openTaskDetail(task) }
         tasksRecyclerView.adapter = tasksAdapter
 
         findViewById<TextView>(R.id.tasksViewCompletedButton).setOnClickListener {
@@ -350,11 +354,34 @@ class HomeActivity : AppCompatActivity() {
             ) {
                 is SupabaseTasksApi.ListResult.Success -> {
                     val completedRm = SupabaseTasksApi.listTasks(token, TaskListFilter.COMPLETED_WITH_ROADMAP)
+                    val completedAll = SupabaseTasksApi.listTasks(token, TaskListFilter.COMPLETED)
                     val extra = when (completedRm) {
                         is SupabaseTasksApi.ListResult.Success -> completedRm.tasks
                         is SupabaseTasksApi.ListResult.Failure -> emptyList()
                     }
-                    val mergedForPlan = active.tasks + extra
+                    val today = LocalDate.now()
+                    val simpleCompletedForPlan = when (completedAll) {
+                        is SupabaseTasksApi.ListResult.Success -> completedAll.tasks.filter { task ->
+                            TaskKind.isSimpleTask(task) &&
+                                TodayPlanWork.simpleCompletedInPlanToday(
+                                    task.id,
+                                    homeTodayPlanPinnedCheckedKeys,
+                                    homeSimpleCompletedTodayIds,
+                                ) &&
+                                TodayPlanWork.simpleTaskDueLocalDate(task)?.let { !it.isAfter(today) } == true
+                        }
+                        is SupabaseTasksApi.ListResult.Failure -> emptyList()
+                    }
+                    val simpleFutureCompletedForGetAhead = when (completedAll) {
+                        is SupabaseTasksApi.ListResult.Success -> completedAll.tasks.filter { task ->
+                            TaskKind.isSimpleTask(task) &&
+                                TodayPlanWork.simpleTaskDueLocalDate(task)?.isAfter(today) == true &&
+                                "${task.id}:simple" in homeGetAheadPinnedCheckedKeys
+                        }
+                        is SupabaseTasksApi.ListResult.Failure -> emptyList()
+                    }
+                    val mergedForPlan = (active.tasks + extra + simpleCompletedForPlan + simpleFutureCompletedForGetAhead)
+                        .distinctBy { it.id }
                     runOnUiThread {
                         if (showLoading) homeUpcomingLoading.visibility = View.GONE
                         homeUpcomingDisplayedIds = emptyList()
@@ -382,41 +409,17 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private data class HomeTodayPlanEntry(
-        val task: SupabaseTasksApi.TaskRow,
-        val step: RoadmapStep,
-        val stepIndex: Int,
-        val recommendedOn: LocalDate,
-    )
-
-    private fun collectTodayPlanEntries(
+    private fun collectFuturePlanEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
-        val out = ArrayList<HomeTodayPlanEntry>()
-        for (task in tasks) {
-            val steps = RoadmapStep.parseList(task.roadmap)
-            steps.forEachIndexed { index, step ->
-                val on = RoadmapStep.recommendedLocalDate(step) ?: return@forEachIndexed
-                if (on.isAfter(today)) return@forEachIndexed
-                out.add(
-                    HomeTodayPlanEntry(
-                        task = task,
-                        step = step,
-                        stepIndex = index,
-                        recommendedOn = on,
-                    ),
-                )
-            }
-        }
-        return out
-    }
+    ): List<TodayPlanEntry> =
+        TodayPlanWork.collectFuturePlanEntries(tasks, today, homeGetAheadPinnedCheckedKeys)
 
     /** All roadmap steps on or before [today] (raw pool; includes completed overdue). */
     private fun todayPlanScopeEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
-    ): List<HomeTodayPlanEntry> = collectTodayPlanEntries(tasks, today)
+    ): List<TodayPlanEntry> = TodayPlanWork.collectTodayPlanScopeEntries(tasks, today)
 
     /**
      * **Today's plan** work set: unchecked steps from before [today], plus every step scheduled on [today]
@@ -425,10 +428,15 @@ class HomeActivity : AppCompatActivity() {
     private fun todayPlanWorkEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
+    ): List<TodayPlanEntry> {
         val scope = todayPlanScopeEntries(tasks, today)
-        val incompleteOverdue = scope.filter { it.recommendedOn.isBefore(today) && !it.step.completed }
-        val todayEntries = scope.filter { it.recommendedOn == today }
+        val incompleteOverdue = scope.filter { it.recommendedOn.isBefore(today) && !it.isCompleted }
+        val todayEntries = scope.filter { entry ->
+            when {
+                entry.isSimple -> entry.recommendedOn == today && !entry.isCompleted
+                else -> entry.recommendedOn == today
+            }
+        }
         return incompleteOverdue + todayEntries
     }
 
@@ -439,10 +447,22 @@ class HomeActivity : AppCompatActivity() {
     private fun todayPlanProgressEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
+    ): List<TodayPlanEntry> {
         val zone = ZoneId.systemDefault()
+        val pinned = homeTodayPlanPinnedCheckedKeys
+        val completedToday = homeSimpleCompletedTodayIds
         return todayPlanScopeEntries(tasks, today).filter { entry ->
-            TodayPlanWork.countsTowardTodayProgress(entry.step, entry.recommendedOn, today, zone)
+            if (entry.isSimple) {
+                TodayPlanWork.simpleCountsTowardTodayProgress(
+                    entry.task,
+                    entry.recommendedOn,
+                    today,
+                    pinned,
+                    completedToday,
+                )
+            } else {
+                TodayPlanWork.countsTowardTodayProgress(entry.step!!, entry.recommendedOn, today, zone)
+            }
         }
     }
 
@@ -451,54 +471,33 @@ class HomeActivity : AppCompatActivity() {
         today: LocalDate,
     ): Boolean {
         val work = todayPlanWorkEntries(tasksSnapshot, today)
-        return work.isNotEmpty() && work.all { it.step.completed }
+        return work.isNotEmpty() && work.all { it.isCompleted }
     }
 
     /**
-     * “View what you completed” for [today]: steps whose [RoadmapStep.completedAt] is today only.
+     * “View what you completed” for [today]: roadmap steps and simple tasks finished today.
      */
     private fun todayPlanCompletedReviewEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
+    ): List<TodayPlanEntry> {
         val zone = ZoneId.systemDefault()
+        val pinned = homeTodayPlanPinnedCheckedKeys
+        val completedToday = homeSimpleCompletedTodayIds
         return todayPlanScopeEntries(tasks, today).filter { entry ->
-            TodayPlanWork.wasCompletedToday(entry.step, today, zone)
-        }
-    }
-
-    private fun collectFuturePlanEntries(
-        tasks: List<SupabaseTasksApi.TaskRow>,
-        today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
-        val out = ArrayList<HomeTodayPlanEntry>()
-        for (task in tasks) {
-            val steps = RoadmapStep.parseList(task.roadmap)
-            steps.forEachIndexed { index, step ->
-                val on = RoadmapStep.recommendedLocalDate(step) ?: return@forEachIndexed
-                if (!on.isAfter(today)) return@forEachIndexed
-                out.add(
-                    HomeTodayPlanEntry(
-                        task = task,
-                        step = step,
-                        stepIndex = index,
-                        recommendedOn = on,
-                    ),
-                )
+            when {
+                entry.isSimple -> entry.isCompleted &&
+                    TodayPlanWork.simpleCompletedInPlanToday(entry.task.id, pinned, completedToday)
+                else -> TodayPlanWork.wasCompletedToday(entry.step!!, today, zone)
             }
         }
-        return out
     }
 
-    private fun sortTodayPlanEntries(entries: List<HomeTodayPlanEntry>, today: LocalDate): List<HomeTodayPlanEntry> {
-        val (past, dueToday) = entries.partition { it.recommendedOn.isBefore(today) }
-        val sortedPast = sortByTaskRankThenRoadmap(past, overdueAwareTaskRankComparator())
-        val sortedToday = sortByTaskRankThenRoadmap(dueToday, todayTaskRankComparator())
-        return sortedPast + sortedToday
-    }
+    private fun sortTodayPlanEntries(entries: List<TodayPlanEntry>, today: LocalDate): List<TodayPlanEntry> =
+        TodayPlanWork.sortTodayPlanEntries(entries, today)
 
     /** Overdue tasks (by due date) rise to the top within the past-due step bucket. */
-    private fun overdueAwareTaskRankComparator(): Comparator<HomeTodayPlanEntry> =
+    private fun overdueAwareTaskRankComparator(): Comparator<TodayPlanEntry> =
         Comparator { a, b ->
             val oa = DueDateHumanLabel.isOverdue(a.task.dueDate, a.task.status)
             val ob = DueDateHumanLabel.isOverdue(b.task.dueDate, b.task.status)
@@ -515,19 +514,19 @@ class HomeActivity : AppCompatActivity() {
      * while that section is visible to avoid duplicate presentation.
      */
     private fun buildCompletedReviewDays(
-        todayEntries: List<HomeTodayPlanEntry>,
-        futureEntries: List<HomeTodayPlanEntry>,
+        todayEntries: List<TodayPlanEntry>,
+        futureEntries: List<TodayPlanEntry>,
         today: LocalDate,
         getAheadVisible: Boolean,
         focusDay: LocalDate?,
-    ): List<Pair<LocalDate, List<HomeTodayPlanEntry>>> {
-        val out = ArrayList<Pair<LocalDate, List<HomeTodayPlanEntry>>>()
+    ): List<Pair<LocalDate, List<TodayPlanEntry>>> {
+        val out = ArrayList<Pair<LocalDate, List<TodayPlanEntry>>>()
         if (todayEntries.isNotEmpty()) {
             out.add(today to sortTodayPlanEntries(todayEntries, today))
         }
         futureEntries.groupBy { it.recommendedOn }.toSortedMap().forEach { (day, list) ->
             // Keep a future day visible once it has any completed work, even if not fully done yet.
-            if (list.isEmpty() || list.none { it.step.completed }) return@forEach
+            if (list.isEmpty() || list.none { it.isCompleted }) return@forEach
             if (getAheadVisible && focusDay != null && day == focusDay) return@forEach
             out.add(day to sortGetAheadDayEntries(list))
         }
@@ -544,7 +543,7 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun bindCompletedReviewByDay(
-        reviewDays: List<Pair<LocalDate, List<HomeTodayPlanEntry>>>,
+        reviewDays: List<Pair<LocalDate, List<TodayPlanEntry>>>,
         today: LocalDate,
         getAheadVisible: Boolean,
         focusDay: LocalDate?,
@@ -595,7 +594,7 @@ class HomeActivity : AppCompatActivity() {
             } else {
                 day.format(dateFmt)
             }
-            val allDoneOnDay = list.all { it.step.completed }
+            val allDoneOnDay = list.all { it.isCompleted }
             val partiallyDoneFutureDay = day.isAfter(today) && !allDoneOnDay
             val compactTodayReview = day == today && hasRemainingPlanWork
             if (compactTodayReview) {
@@ -678,65 +677,65 @@ class HomeActivity : AppCompatActivity() {
         homeTodayPlanCompletedByDayHost.visibility = if (hasFutureBlocks) View.VISIBLE else View.GONE
     }
 
-    private fun todayPlanEntryKey(entry: HomeTodayPlanEntry): String =
-        "${entry.task.id}:${entry.stepIndex}"
+    private fun todayPlanEntryKey(entry: TodayPlanEntry): String = entry.entryKey()
 
-    private fun prunePinnedTodayPlanKeys(entries: List<HomeTodayPlanEntry>) {
+    private fun prunePinnedTodayPlanKeys(entries: List<TodayPlanEntry>) {
         val byKey = entries.associateBy { todayPlanEntryKey(it) }
         homeTodayPlanPinnedCheckedKeys.removeAll { key ->
             val e = byKey[key]
-            e == null || !e.step.completed
+            e == null || !e.isCompleted
         }
     }
 
     private fun buildCollapsedVisibleEntries(
-        entries: List<HomeTodayPlanEntry>,
+        entries: List<TodayPlanEntry>,
         today: LocalDate,
-    ): List<HomeTodayPlanEntry> {
+    ): List<TodayPlanEntry> {
         prunePinnedTodayPlanKeys(entries)
-        val uncheckedSorted = sortTodayPlanEntries(entries.filter { !it.step.completed }, today)
-        val topUnchecked = uncheckedSorted.take(2)
-        val pinned = homeTodayPlanPinnedCheckedKeys.mapNotNull { key ->
-            entries.find { todayPlanEntryKey(it) == key && it.step.completed }
+        val sorted = sortTodayPlanEntries(entries, today)
+        val pinnedKeys = homeTodayPlanPinnedCheckedKeys
+        var uncheckedShown = 0
+        val out = ArrayList<TodayPlanEntry>()
+        for (entry in sorted) {
+            when {
+                !entry.isCompleted && uncheckedShown < 2 -> {
+                    out.add(entry)
+                    uncheckedShown++
+                }
+                entry.isCompleted && todayPlanEntryKey(entry) in pinnedKeys -> out.add(entry)
+            }
         }
-        val combined = (topUnchecked + pinned).distinctBy { todayPlanEntryKey(it) }
-        val rank = sortTodayPlanEntries(entries, today).withIndex().associate { (i, e) ->
-            todayPlanEntryKey(e) to i
-        }
-        return combined.sortedWith(
-            compareBy<HomeTodayPlanEntry> { it.step.completed }
-                .thenBy { rank[todayPlanEntryKey(it)] ?: Int.MAX_VALUE },
-        )
+        return out.sortedWith(compareBy({ !it.isSimple }, { sorted.indexOfFirst { e -> todayPlanEntryKey(e) == todayPlanEntryKey(it) } }))
     }
 
-    private fun pruneGetAheadPinnedKeys(futureEntries: List<HomeTodayPlanEntry>) {
+    private fun pruneGetAheadPinnedKeys(futureEntries: List<TodayPlanEntry>) {
         val byKey = futureEntries.associateBy { todayPlanEntryKey(it) }
         homeGetAheadPinnedCheckedKeys.removeAll { key ->
             val e = byKey[key]
-            e == null || !e.step.completed
+            e == null || !e.isCompleted
         }
     }
 
-    private fun todayTaskRankComparator(): Comparator<HomeTodayPlanEntry> =
-        compareBy<HomeTodayPlanEntry> { it.step.priority }
-            .thenByDescending { it.step.estimatedHours ?: -1.0 }
+    private fun todayTaskRankComparator(): Comparator<TodayPlanEntry> =
+        compareBy<TodayPlanEntry> { it.step!!.priority }
+            .thenByDescending { it.step!!.estimatedHours ?: -1.0 }
             .thenBy(nullsLast()) { it.task.dueDate }
 
-    private fun taskLeadEntry(taskEntries: List<HomeTodayPlanEntry>): HomeTodayPlanEntry =
-        taskEntries.filter { !it.step.completed }.minByOrNull { it.stepIndex }
+    private fun taskLeadEntry(taskEntries: List<TodayPlanEntry>): TodayPlanEntry =
+        taskEntries.filter { !it.isCompleted }.minByOrNull { it.stepIndex }
             ?: taskEntries.minBy { it.stepIndex }
 
     /**
      * Rank tasks first, then keep each task's roadmap sequence (`stepIndex`) intact.
      */
     private fun sortByTaskRankThenRoadmap(
-        entries: List<HomeTodayPlanEntry>,
-        taskRankComparator: Comparator<HomeTodayPlanEntry>,
-    ): List<HomeTodayPlanEntry> {
+        entries: List<TodayPlanEntry>,
+        taskRankComparator: Comparator<TodayPlanEntry>,
+    ): List<TodayPlanEntry> {
         if (entries.isEmpty()) return emptyList()
         val groups = entries.groupBy { it.task.id }.values
         val sortedGroups = groups.sortedWith(
-            Comparator<List<HomeTodayPlanEntry>> { a, b ->
+            Comparator<List<TodayPlanEntry>> { a, b ->
                 val leadA = taskLeadEntry(a)
                 val leadB = taskLeadEntry(b)
                 val ranked = taskRankComparator.compare(leadA, leadB)
@@ -746,39 +745,20 @@ class HomeActivity : AppCompatActivity() {
         return sortedGroups.flatMap { group -> group.sortedBy { it.stepIndex } }
     }
 
-    private fun sortGetAheadDayEntries(dayEntries: List<HomeTodayPlanEntry>): List<HomeTodayPlanEntry> {
-        if (dayEntries.isEmpty()) return emptyList()
-        val byTask = dayEntries.groupBy { it.task.id }.values
-        val taskComparator = Comparator<List<HomeTodayPlanEntry>> { a, b ->
-            val leadA = taskLeadEntry(a)
-            val leadB = taskLeadEntry(b)
-            val overdueA = DueDateHumanLabel.isOverdue(leadA.task.dueDate, leadA.task.status)
-            val overdueB = DueDateHumanLabel.isOverdue(leadB.task.dueDate, leadB.task.status)
-            when {
-                overdueA && !overdueB -> -1
-                !overdueA && overdueB -> 1
-                else -> {
-                    val ranked = todayTaskRankComparator().compare(leadA, leadB)
-                    if (ranked != 0) ranked else leadA.task.id.compareTo(leadB.task.id)
-                }
-            }
-        }
-        return byTask
-            .sortedWith(taskComparator)
-            .flatMap { group -> group.sortedBy { it.stepIndex } }
-    }
+    private fun sortGetAheadDayEntries(dayEntries: List<TodayPlanEntry>): List<TodayPlanEntry> =
+        TodayPlanWork.sortFutureDayEntries(dayEntries)
 
     private fun resolveGetAheadFocusDate(
-        futureEntries: List<HomeTodayPlanEntry>,
+        futureEntries: List<TodayPlanEntry>,
         requireStartedOnFocusDay: Boolean,
     ): LocalDate? {
         val incompleteDays = futureEntries.groupBy { it.recommendedOn }
             .toSortedMap()
             .entries
             .mapNotNull { (day, list) ->
-                val hasIncomplete = list.any { !it.step.completed }
+                val hasIncomplete = list.any { !it.isCompleted }
                 if (!hasIncomplete) return@mapNotNull null
-                if (requireStartedOnFocusDay && list.none { it.step.completed }) return@mapNotNull null
+                if (requireStartedOnFocusDay && list.none { it.isCompleted }) return@mapNotNull null
                 day
             }
         if (incompleteDays.isNotEmpty()) {
@@ -790,24 +770,27 @@ class HomeActivity : AppCompatActivity() {
         }.map { it.recommendedOn }.minOrNull()
     }
 
-    private fun buildGetAheadCollapsedVisible(dayEntries: List<HomeTodayPlanEntry>): List<HomeTodayPlanEntry> {
-        val sortedDay = sortGetAheadDayEntries(dayEntries)
-        val uncheckedSorted = sortedDay.filter { !it.step.completed }
-        val topUnchecked = uncheckedSorted.take(2)
-        // Keep completed rows visible for the focused day so unchecking one future step does not
-        // hide the other completed work for that same day.
-        val completedRows = sortedDay.filter { it.step.completed }
-        val pinned = homeGetAheadPinnedCheckedKeys.mapNotNull { key ->
-            dayEntries.find { todayPlanEntryKey(it) == key && it.step.completed }
+    private fun buildGetAheadCollapsedVisible(dayEntries: List<TodayPlanEntry>): List<TodayPlanEntry> {
+        val sorted = sortGetAheadDayEntries(dayEntries)
+        val pinnedKeys = homeGetAheadPinnedCheckedKeys
+        var uncheckedShown = 0
+        val out = ArrayList<TodayPlanEntry>()
+        for (entry in sorted) {
+            when {
+                !entry.isCompleted && uncheckedShown < 2 -> {
+                    out.add(entry)
+                    uncheckedShown++
+                }
+                entry.isCompleted && todayPlanEntryKey(entry) in pinnedKeys -> out.add(entry)
+            }
         }
-        val combined = (topUnchecked + completedRows + pinned).distinctBy { todayPlanEntryKey(it) }
-        val rank = sortedDay.withIndex().associate { (i, e) ->
-            todayPlanEntryKey(e) to i
+        for (entry in sorted.filter { it.isCompleted }) {
+            if (out.none { todayPlanEntryKey(it) == todayPlanEntryKey(entry) }) {
+                out.add(entry)
+            }
         }
-        return combined.sortedWith(
-            compareBy<HomeTodayPlanEntry> { it.step.completed }
-                .thenBy { rank[todayPlanEntryKey(it)] ?: Int.MAX_VALUE },
-        )
+        val rank = sorted.withIndex().associate { (i, e) -> todayPlanEntryKey(e) to i }
+        return out.sortedBy { rank[todayPlanEntryKey(it)] ?: Int.MAX_VALUE }
     }
 
     /** @return true if the Get ahead block is visible after binding. */
@@ -839,7 +822,7 @@ class HomeActivity : AppCompatActivity() {
             }
             homeGetAheadFocusDate = focus
             val dayEntries = futureEntries.filter { it.recommendedOn == focus }
-            val hasIncompleteOnDay = dayEntries.any { !it.step.completed }
+            val hasIncompleteOnDay = dayEntries.any { !it.isCompleted }
             val pinsOnDay = homeGetAheadPinnedCheckedKeys.any { key ->
                 futureEntries.find { todayPlanEntryKey(it) == key }?.recommendedOn == focus
             }
@@ -884,21 +867,21 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun bindPlanProgress(
-        entries: List<HomeTodayPlanEntry>,
+        entries: List<TodayPlanEntry>,
         stepsSummary: TextView,
         hoursSummary: TextView,
         hoursProgress: ProgressBar,
         stepsSummaryRes: Int,
     ) {
         val totalSteps = entries.size
-        val doneSteps = entries.count { it.step.completed }
+        val doneSteps = entries.count { it.isCompleted }
         stepsSummary.text = getString(stepsSummaryRes, doneSteps, totalSteps)
         var doneHours = 0.0
         var totalHours = 0.0
         for (e in entries) {
-            val h = e.step.estimatedHours ?: 0.0
+            val h = e.estimatedHoursForProgress()
             totalHours += h
-            if (e.step.completed) doneHours += h
+            if (e.isCompleted) doneHours += h
         }
         hoursSummary.text = getString(
             R.string.home_today_plan_hours_summary,
@@ -962,22 +945,28 @@ class HomeActivity : AppCompatActivity() {
         return getString(R.string.home_today_plan_step_meta, timePart, priorityPart)
     }
 
-    private fun bindPlanStepRows(parent: LinearLayout, visibleEntries: List<HomeTodayPlanEntry>) {
+    private fun formatSimpleTodayPlanMeta(entry: TodayPlanEntry): String {
+        val dueFormatted = entry.task.dueDate?.let { DueDateTimeFormat.displayListRow(it) }
+            ?: getString(R.string.due_date_not_set)
+        return getString(R.string.task_row_due_line, dueFormatted)
+    }
+
+    private fun bindPlanStepRows(parent: LinearLayout, visibleEntries: List<TodayPlanEntry>) {
         parent.removeAllViews()
         val inflater = LayoutInflater.from(this)
         val density = resources.displayMetrics.density
         val headerTopFirst = (4 * density).toInt()
         val headerTopRest = (12 * density).toInt()
-        val taskOrder = visibleEntries.map { it.task.id }.distinct()
-        val taskRank = taskOrder.withIndex().associate { (idx, id) -> id to idx }
-        val orderedEntries = visibleEntries.sortedWith(
-            compareBy<HomeTodayPlanEntry> { taskRank[it.task.id] ?: Int.MAX_VALUE }
-                .thenBy { it.stepIndex },
-        )
+        val today = LocalDate.now()
+
+        for (entry in visibleEntries.filter { it.isSimple }) {
+            bindSimplePlanRow(parent, inflater, entry, today)
+        }
+
         var isFirstHeader = true
-        var lastTaskId: String? = null
-        for (entry in orderedEntries) {
-            if (entry.task.id != lastTaskId) {
+        var lastComplexTaskId: String? = null
+        for (entry in visibleEntries.filter { !it.isSimple }) {
+            if (entry.task.id != lastComplexTaskId) {
                 val header = inflater.inflate(R.layout.item_home_today_plan_task_header, parent, false)
                 val top = if (isFirstHeader) headerTopFirst else headerTopRest
                 isFirstHeader = false
@@ -985,43 +974,93 @@ class HomeActivity : AppCompatActivity() {
                 header.findViewById<TextView>(R.id.homeTodayPlanTaskHeader).text = entry.task.title
                 header.setOnClickListener { openTaskDetail(entry.task) }
                 parent.addView(header)
-                lastTaskId = entry.task.id
+                lastComplexTaskId = entry.task.id
             }
-            val row = inflater.inflate(R.layout.item_home_today_plan_step, parent, false)
-            val check = row.findViewById<MaterialCheckBox>(R.id.homeTodayPlanStepCheck)
-            val title = row.findViewById<TextView>(R.id.homeTodayPlanStepTitle)
-            val meta = row.findViewById<TextView>(R.id.homeTodayPlanStepMeta)
-            val stepDay = RoadmapStep.recommendedLocalDate(entry.step)
-            val isOverdue = stepDay != null && stepDay.isBefore(LocalDate.now()) && !entry.step.completed
-            title.text = entry.step.title
-            val baseMeta = formatTodayPlanStepMeta(entry.step)
-            meta.text = if (isOverdue) {
-                getString(R.string.home_today_plan_due_overdue) + " · " + baseMeta
-            } else {
-                baseMeta
-            }
-            meta.setTextColor(
-                if (isOverdue) {
-                    MaterialColors.getColor(meta, com.google.android.material.R.attr.colorError)
-                } else {
-                    MaterialColors.getColor(meta, com.google.android.material.R.attr.colorOnSurfaceVariant)
-                }
-            )
-            check.setOnCheckedChangeListener(null)
-            check.isChecked = entry.step.completed
-            check.setOnCheckedChangeListener { _, checked ->
-                onTodayPlanStepToggled(entry.task.id, entry.stepIndex, checked)
-            }
-            applyTodayPlanStepCompletedStyle(title, meta, check, entry.step.completed)
-            check.isEnabled = !homeRoadmapPatchInFlight
-            val stepRow = row.findViewById<View>(R.id.homeTodayPlanStepRow)
-            stepRow.isClickable = !homeRoadmapPatchInFlight
-            stepRow.background = null
-            stepRow.setOnClickListener {
-                if (!homeRoadmapPatchInFlight) check.performClick()
-            }
-            parent.addView(row)
+            bindComplexPlanRow(parent, inflater, entry, today)
         }
+    }
+
+    private fun bindSimplePlanRow(
+        parent: LinearLayout,
+        inflater: LayoutInflater,
+        entry: TodayPlanEntry,
+        today: LocalDate,
+    ) {
+        val row = inflater.inflate(R.layout.item_home_today_plan_step, parent, false)
+        val check = row.findViewById<MaterialCheckBox>(R.id.homeTodayPlanStepCheck)
+        val title = row.findViewById<TextView>(R.id.homeTodayPlanStepTitle)
+        val meta = row.findViewById<TextView>(R.id.homeTodayPlanStepMeta)
+        val isOverdue = entry.recommendedOn.isBefore(today) && !entry.isCompleted
+        title.text = entry.task.title
+        meta.text = if (isOverdue) {
+            getString(R.string.home_today_plan_due_overdue) + " · " + formatSimpleTodayPlanMeta(entry)
+        } else {
+            formatSimpleTodayPlanMeta(entry)
+        }
+        meta.setTextColor(
+            if (isOverdue) {
+                MaterialColors.getColor(meta, com.google.android.material.R.attr.colorError)
+            } else {
+                MaterialColors.getColor(meta, com.google.android.material.R.attr.colorOnSurfaceVariant)
+            },
+        )
+        check.setOnCheckedChangeListener(null)
+        check.isChecked = entry.isCompleted
+        check.setOnCheckedChangeListener { _, checked ->
+            onSimpleTodayPlanToggled(entry.task.id, checked)
+        }
+        applyTodayPlanStepCompletedStyle(title, meta, check, entry.isCompleted)
+        check.isEnabled = !homeRoadmapPatchInFlight
+        val stepRow = row.findViewById<View>(R.id.homeTodayPlanStepRow)
+        stepRow.isClickable = !homeRoadmapPatchInFlight
+        stepRow.background = null
+        stepRow.setOnClickListener {
+            if (!homeRoadmapPatchInFlight) check.performClick()
+        }
+        parent.addView(row)
+    }
+
+    private fun bindComplexPlanRow(
+        parent: LinearLayout,
+        inflater: LayoutInflater,
+        entry: TodayPlanEntry,
+        today: LocalDate,
+    ) {
+        val row = inflater.inflate(R.layout.item_home_today_plan_step, parent, false)
+        val check = row.findViewById<MaterialCheckBox>(R.id.homeTodayPlanStepCheck)
+        val title = row.findViewById<TextView>(R.id.homeTodayPlanStepTitle)
+        val meta = row.findViewById<TextView>(R.id.homeTodayPlanStepMeta)
+        val step = entry.step!!
+        val stepDay = RoadmapStep.recommendedLocalDate(step)
+        val isOverdue = stepDay != null && stepDay.isBefore(today) && !entry.isCompleted
+        title.text = step.title
+        val baseMeta = formatTodayPlanStepMeta(step)
+        meta.text = if (isOverdue) {
+            getString(R.string.home_today_plan_due_overdue) + " · " + baseMeta
+        } else {
+            baseMeta
+        }
+        meta.setTextColor(
+            if (isOverdue) {
+                MaterialColors.getColor(meta, com.google.android.material.R.attr.colorError)
+            } else {
+                MaterialColors.getColor(meta, com.google.android.material.R.attr.colorOnSurfaceVariant)
+            },
+        )
+        check.setOnCheckedChangeListener(null)
+        check.isChecked = entry.isCompleted
+        check.setOnCheckedChangeListener { _, checked ->
+            onTodayPlanStepToggled(entry.task.id, entry.stepIndex, checked)
+        }
+        applyTodayPlanStepCompletedStyle(title, meta, check, entry.isCompleted)
+        check.isEnabled = !homeRoadmapPatchInFlight
+        val stepRow = row.findViewById<View>(R.id.homeTodayPlanStepRow)
+        stepRow.isClickable = !homeRoadmapPatchInFlight
+        stepRow.background = null
+        stepRow.setOnClickListener {
+            if (!homeRoadmapPatchInFlight) check.performClick()
+        }
+        parent.addView(row)
     }
 
     private fun bindHomeTodayPlan(allActiveTasks: List<SupabaseTasksApi.TaskRow>) {
@@ -1030,10 +1069,10 @@ class HomeActivity : AppCompatActivity() {
         val today = LocalDate.now()
         val workEntries = todayPlanWorkEntries(allActiveTasks, today)
         val progressEntries = todayPlanProgressEntries(allActiveTasks, today)
-        val hasIncomplete = workEntries.any { !it.step.completed }
+        val hasIncomplete = workEntries.any { !it.isCompleted }
         val reviewTodayEntries = todayPlanCompletedReviewEntries(allActiveTasks, today)
         val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
-        val hasStartedFutureWork = futureEntries.any { it.step.completed }
+        val hasStartedFutureWork = futureEntries.any { it.isCompleted }
 
         if (progressEntries.isEmpty() || !hasIncomplete) {
             homeTodayPlanProgressBlock.visibility = View.GONE
@@ -1061,7 +1100,7 @@ class HomeActivity : AppCompatActivity() {
             )
             bindPlanStepRows(homeTodayPlanGroups, visibleEntries)
         } else {
-            homeTodayPlanEmpty.text = formatTodayPlanCollapsedEmptyText()
+            homeTodayPlanExpanded = false
             homeTodayPlanToggle.visibility = View.GONE
             homeTodayPlanGroups.visibility = View.GONE
             homeTodayPlanGroups.removeAllViews()
@@ -1100,7 +1139,14 @@ class HomeActivity : AppCompatActivity() {
         )
 
         val hasAnythingVisible = hasIncomplete || reviewDays.isNotEmpty() || getAheadVisible
-        homeTodayPlanEmpty.visibility = if (hasAnythingVisible) View.GONE else View.VISIBLE
+        if (!hasAnythingVisible) {
+            homeTodayPlanEmpty.text = formatTodayPlanCollapsedEmptyText()
+            homeTodayPlanEmpty.visibility = View.VISIBLE
+        } else if (hasIncomplete) {
+            homeTodayPlanEmpty.visibility = View.GONE
+        } else {
+            homeTodayPlanEmpty.visibility = View.GONE
+        }
         if (!hasAnythingVisible) {
             homeTodayPlanCompletedTodayHost.visibility = View.GONE
             homeTodayPlanCompletedTodayHost.removeAllViews()
@@ -1111,8 +1157,132 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    private fun onSimpleTodayPlanToggled(taskId: String, checked: Boolean) {
+        if (homeRoadmapPatchInFlight) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        val task = homeTasksSnapshot.find { it.id == taskId } ?: return
+        if (!TaskKind.isSimpleTask(task)) return
+        if (checked && task.status == TaskStatus.COMPLETE) return
+        if (!checked && task.status != TaskStatus.COMPLETE) return
+
+        val pinKey = "$taskId:simple"
+        val today = LocalDate.now()
+        val due = TodayPlanWork.simpleTaskDueLocalDate(task)
+        val isFutureDue = due != null && due.isAfter(today)
+        val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
+        val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
+        val userIdForProfileWrites = userIdForAchievements
+        val beforeSnapshot = homeTasksSnapshot
+        val beforeTodayHalf = todayHalfwayRatio(beforeSnapshot, today)
+        val workPlanCompleteBefore = isTodayWorkPlanComplete(beforeSnapshot, today)
+        val hadOverdueBefore = TodayPlanWork.hasIncompleteOverdueSteps(beforeSnapshot, today)
+
+        if (checked) {
+            homeSimpleCompletedTodayIds.add(taskId)
+            if (isFutureDue) {
+                homeGetAheadPinnedCheckedKeys.add(pinKey)
+            } else {
+                homeTodayPlanPinnedCheckedKeys.add(pinKey)
+            }
+        } else {
+            homeTodayPlanPinnedCheckedKeys.remove(pinKey)
+            homeGetAheadPinnedCheckedKeys.remove(pinKey)
+            homeSimpleCompletedTodayIds.remove(taskId)
+        }
+
+        homeRoadmapPatchInFlight = true
+        homeTasksSnapshot = homeTasksSnapshot.map { row ->
+            if (row.id == taskId) row.copy(status = targetStatus) else row
+        }
+        bindHomeTodayPlan(homeTasksSnapshot)
+        if (checked) {
+            updateHomeUpcomingPreview(homeTasksSnapshot, newlyCompletedTaskId = taskId)
+        } else {
+            refreshHomeUpcomingPreview(homeTasksSnapshot)
+        }
+
+        var planCompleteFired = false
+        if (checked) {
+            if (userIdForAchievements != null) {
+                AchievementManager.ensureLoaded(token, userIdForAchievements)
+                AchievementManager.maybeShowFirstTaskCompleted(this, token, userIdForAchievements)
+            }
+            val overdueClearedNow = hadOverdueBefore &&
+                !TodayPlanWork.hasIncompleteOverdueSteps(homeTasksSnapshot, today)
+            if (overdueClearedNow) {
+                planCompleteFired = true
+                AchievementManager.showAllCaughtUp(this)
+            }
+        }
+
+        val workPlanCompleteAfter = isTodayWorkPlanComplete(homeTasksSnapshot, today)
+        if (checked && !planCompleteFired && !workPlanCompleteBefore && workPlanCompleteAfter) {
+            planCompleteFired = true
+            if (userIdForProfileWrites != null) {
+                val uid = userIdForProfileWrites
+                networkExecutor.execute {
+                    val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, today)
+                    runOnUiThread {
+                        if (!isFinishing) {
+                            AchievementManager.showPlanComplete(this@HomeActivity, today, streak)
+                        }
+                    }
+                }
+            } else {
+                AchievementManager.showPlanComplete(this, today, 1)
+            }
+        } else if (!checked && workPlanCompleteBefore && !workPlanCompleteAfter) {
+            if (userIdForProfileWrites != null) {
+                val uid = userIdForProfileWrites
+                networkExecutor.execute {
+                    StreakCoordinator.undoTodayCompletionIfPossible(token, uid)
+                }
+            }
+        }
+
+        if (checked && userIdForAchievements != null && !planCompleteFired) {
+            val afterTodayHalf = todayHalfwayRatio(homeTasksSnapshot, today)
+            if (beforeTodayHalf < 0.5 && afterTodayHalf >= 0.5) {
+                AchievementManager.ensureLoaded(token, userIdForAchievements)
+                AchievementManager.maybeShowHalfwayThroughCurrentTasks(this, token, userIdForAchievements)
+            }
+        }
+
+        networkExecutor.execute {
+            when (val result = SupabaseTasksApi.updateTaskStatus(token, taskId, targetStatus)) {
+                is SupabaseTasksApi.PatchResult.Success -> runOnUiThread {
+                    homeRoadmapPatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    homeTasksSnapshot = homeTasksSnapshot.map { row ->
+                        if (row.id == taskId) row.copy(status = result.status) else row
+                    }
+                    bindHomeTodayPlan(homeTasksSnapshot)
+                    if (checked) {
+                        updateHomeUpcomingPreview(homeTasksSnapshot, newlyCompletedTaskId = taskId)
+                    } else {
+                        refreshHomeUpcomingPreview(homeTasksSnapshot)
+                    }
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
+                }
+                is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
+                    homeRoadmapPatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    Toast.makeText(
+                        this,
+                        getString(R.string.error_task_status_update_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    loadHomeUpcoming(showLoading = false)
+                }
+            }
+        }
+    }
+
     private fun onTodayPlanStepToggled(taskId: String, stepIndex: Int, checked: Boolean) {
         if (homeRoadmapPatchInFlight) return
+        if (stepIndex < 0) return
         val token = SessionManager.getAccessToken(this) ?: return
         val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
         // Use the resolved user id for profile writes even if achievements are disabled/unavailable.
@@ -1140,7 +1310,7 @@ class HomeActivity : AppCompatActivity() {
                     val planEntries = todayPlanWorkEntries(homeTasksSnapshot, today)
                     val hasIncompleteAfter = planEntries.any { e ->
                         val toggled = e.task.id == taskId && e.stepIndex == stepIndex
-                        val done = if (toggled) checked else e.step.completed
+                        val done = if (toggled) checked else e.isCompleted
                         !done
                     }
                     val todayPlanEffectivelyCollapsed = if (hasIncompleteAfter) {
@@ -1166,7 +1336,7 @@ class HomeActivity : AppCompatActivity() {
                         futureEntries.forEach { e ->
                             if (
                                 e.recommendedOn == day &&
-                                e.step.completed &&
+                                e.isCompleted &&
                                 !(e.task.id == taskId && e.stepIndex == stepIndex)
                             ) {
                                 homeGetAheadPinnedCheckedKeys.add(todayPlanEntryKey(e))
@@ -1269,13 +1439,13 @@ class HomeActivity : AppCompatActivity() {
         val progressEntries = todayPlanProgressEntries(tasksSnapshot, today)
         if (progressEntries.isEmpty()) return 0.0
         val totalSteps = progressEntries.size
-        val doneSteps = progressEntries.count { it.step.completed }
+        val doneSteps = progressEntries.count { it.isCompleted }
         var totalHours = 0.0
         var doneHours = 0.0
         for (e in progressEntries) {
-            val h = e.step.estimatedHours ?: 0.0
+            val h = e.estimatedHoursForProgress()
             totalHours += h
-            if (e.step.completed) doneHours += h
+            if (e.isCompleted) doneHours += h
         }
         return if (totalHours > 0.0) {
             (doneHours / totalHours).coerceIn(0.0, 1.0)
@@ -1502,6 +1672,52 @@ class HomeActivity : AppCompatActivity() {
 
     private fun openTaskDetail(task: SupabaseTasksApi.TaskRow) {
         openTaskDetailLauncher.launch(TaskDetailActivity.createIntent(this, task))
+    }
+
+    private fun onSimpleTaskToggled(task: SupabaseTasksApi.TaskRow, checked: Boolean) {
+        if (checked == (task.status == TaskStatus.COMPLETE)) return
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
+        val pinKey = "${task.id}:simple"
+        val today = LocalDate.now()
+        val due = TodayPlanWork.simpleTaskDueLocalDate(task)
+        val inTodayPlanScope = due != null && !due.isAfter(today)
+        if (checked && inTodayPlanScope) {
+            homeSimpleCompletedTodayIds.add(task.id)
+            homeTodayPlanPinnedCheckedKeys.add(pinKey)
+        } else if (!checked) {
+            homeSimpleCompletedTodayIds.remove(task.id)
+            homeTodayPlanPinnedCheckedKeys.remove(pinKey)
+        }
+        networkExecutor.execute {
+            when (val result = SupabaseTasksApi.updateTaskStatus(token, task.id, targetStatus)) {
+                is SupabaseTasksApi.PatchResult.Success -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    loadTasks(showLoading = false)
+                    loadHomeUpcoming(showLoading = false)
+                }
+                is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    if (checked && inTodayPlanScope) {
+                        homeSimpleCompletedTodayIds.remove(task.id)
+                        homeTodayPlanPinnedCheckedKeys.remove(pinKey)
+                    } else if (!checked) {
+                        homeSimpleCompletedTodayIds.add(task.id)
+                        homeTodayPlanPinnedCheckedKeys.add(pinKey)
+                    }
+                    tasksAdapter.notifyDataSetChanged()
+                    Toast.makeText(
+                        this,
+                        getString(R.string.error_task_status_update_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun maybeShowStreakOnAppLaunch(token: String) {

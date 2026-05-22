@@ -48,6 +48,9 @@ class TaskDetailActivity : AppCompatActivity() {
     private lateinit var roadmapHoursSummary: TextView
     private lateinit var roadmapList: RecyclerView
     private lateinit var roadmapAdapter: RoadmapStepsAdapter
+    private lateinit var roadmapCard: com.google.android.material.card.MaterialCardView
+    private lateinit var simpleCard: com.google.android.material.card.MaterialCardView
+    private lateinit var simpleCompleteCheck: com.google.android.material.checkbox.MaterialCheckBox
     private var roadmapSteps: MutableList<RoadmapStep> = mutableListOf()
     private var roadmapPatchInFlight = false
     private var statusPatchInFlight = false
@@ -91,6 +94,13 @@ class TaskDetailActivity : AppCompatActivity() {
 
         editDueButton = findViewById(R.id.taskDetailEditDue)
         findViewById<MaterialButton>(R.id.taskDetailDeleteTask).setOnClickListener { confirmDeleteTask() }
+
+        roadmapCard = findViewById(R.id.taskDetailRoadmapCard)
+        simpleCard = findViewById(R.id.taskDetailSimpleCard)
+        simpleCompleteCheck = findViewById(R.id.taskDetailSimpleCompleteCheck)
+        simpleCompleteCheck.setOnCheckedChangeListener { _, checked ->
+            onSimpleTaskCompleteToggled(checked)
+        }
 
         roadmapProgress = findViewById(R.id.taskDetailRoadmapProgress)
         roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
@@ -181,18 +191,91 @@ class TaskDetailActivity : AppCompatActivity() {
                     refreshDueLabel()
 
                     roadmapSteps = RoadmapStep.parseList(result.task.roadmap).toMutableList()
-                    if (roadmapSteps.isNotEmpty()) {
-                        roadmapAdapter.submitList(roadmapSteps)
-                    } else {
-                        roadmapAdapter.submitList(emptyList())
-                    }
-                    refreshRoadmapProgress()
+                    refreshSimpleOrRoadmapUi(result.task)
 
-                    // Ensure status stays consistent with roadmap progress.
-                    val derived = deriveStatusFromSteps(roadmapSteps)
-                    if (derived != savedStatus) {
-                        persistDerivedStatus(derived)
+                    if (!TaskKind.isSimpleTask(result.task)) {
+                        val derived = deriveStatusFromSteps(roadmapSteps)
+                        if (derived != savedStatus) {
+                            persistDerivedStatus(derived)
+                        }
                     }
+                }
+            }
+        }
+    }
+
+    private fun refreshSimpleOrRoadmapUi(task: SupabaseTasksApi.TaskRow) {
+        if (TaskKind.isSimpleTask(task)) {
+            simpleCard.visibility = View.VISIBLE
+            roadmapCard.visibility = View.GONE
+            simpleCompleteCheck.setOnCheckedChangeListener(null)
+            simpleCompleteCheck.isChecked = task.status == TaskStatus.COMPLETE
+            simpleCompleteCheck.isEnabled = !statusPatchInFlight
+            simpleCompleteCheck.setOnCheckedChangeListener { _, checked ->
+                if (checked != (task.status == TaskStatus.COMPLETE)) {
+                    onSimpleTaskCompleteToggled(checked)
+                }
+            }
+            roadmapAdapter.submitList(emptyList())
+            roadmapProgressLabel.visibility = View.GONE
+            roadmapHoursSummary.visibility = View.GONE
+            roadmapProgress.visibility = View.GONE
+        } else {
+            simpleCard.visibility = View.GONE
+            roadmapCard.visibility = View.VISIBLE
+            if (roadmapSteps.isNotEmpty()) {
+                roadmapAdapter.submitList(roadmapSteps)
+            } else {
+                roadmapAdapter.submitList(emptyList())
+            }
+            refreshRoadmapProgress()
+        }
+    }
+
+    private fun onSimpleTaskCompleteToggled(checked: Boolean) {
+        val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
+        if (targetStatus == savedStatus) return
+        simpleCompleteCheck.isEnabled = false
+        persistSimpleTaskStatus(targetStatus)
+    }
+
+    private fun persistSimpleTaskStatus(status: TaskStatus) {
+        if (statusPatchInFlight) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        statusPatchInFlight = true
+        networkExecutor.execute {
+            when (val result = SupabaseTasksApi.updateTaskStatus(token, taskId, status)) {
+                is SupabaseTasksApi.PatchResult.Success -> runOnUiThread {
+                    statusPatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    savedStatus = result.status
+                    refreshStatusLine(savedStatus)
+                    refreshDueLabel()
+                    simpleCompleteCheck.setOnCheckedChangeListener(null)
+                    simpleCompleteCheck.isChecked = savedStatus == TaskStatus.COMPLETE
+                    simpleCompleteCheck.isEnabled = true
+                    simpleCompleteCheck.setOnCheckedChangeListener { _, checked ->
+                        if (checked != (savedStatus == TaskStatus.COMPLETE)) {
+                            onSimpleTaskCompleteToggled(checked)
+                        }
+                    }
+                }
+                is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
+                    statusPatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    simpleCompleteCheck.setOnCheckedChangeListener(null)
+                    simpleCompleteCheck.isChecked = savedStatus == TaskStatus.COMPLETE
+                    simpleCompleteCheck.isEnabled = true
+                    simpleCompleteCheck.setOnCheckedChangeListener { _, checked ->
+                        if (checked != (savedStatus == TaskStatus.COMPLETE)) {
+                            onSimpleTaskCompleteToggled(checked)
+                        }
+                    }
+                    Toast.makeText(
+                        this,
+                        getString(R.string.error_task_status_update_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }

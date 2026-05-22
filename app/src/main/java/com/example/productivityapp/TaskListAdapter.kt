@@ -9,11 +9,13 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.color.MaterialColors
 import java.time.LocalDate
 import java.time.LocalDateTime
 
 class TaskListAdapter(
+    private val onSimpleTaskToggled: ((SupabaseTasksApi.TaskRow, Boolean) -> Unit)? = null,
     private val onTaskClick: (SupabaseTasksApi.TaskRow) -> Unit,
 ) : ListAdapter<SupabaseTasksApi.TaskRow, TaskListAdapter.TaskVH>(DIFF) {
 
@@ -46,18 +48,35 @@ class TaskListAdapter(
             },
         )
 
+        val isSimple = TaskKind.isSimpleTask(item)
         val summary = RoadmapProgress.summarize(item.roadmap)
-        if (summary.total <= 0) {
+        if (isSimple && onSimpleTaskToggled != null) {
+            holder.completeCheck.visibility = View.VISIBLE
+            holder.completeCheck.setOnCheckedChangeListener(null)
+            holder.completeCheck.isChecked = item.status == TaskStatus.COMPLETE
+            holder.completeCheck.isEnabled = true
+            holder.completeCheck.setOnCheckedChangeListener { _, checked ->
+                if (checked != (item.status == TaskStatus.COMPLETE)) {
+                    onSimpleTaskToggled.invoke(item, checked)
+                }
+            }
             holder.progress.visibility = View.GONE
         } else {
-            holder.progress.visibility = View.VISIBLE
-            holder.progress.progress = summary.percent
+            holder.completeCheck.visibility = View.GONE
+            holder.completeCheck.setOnCheckedChangeListener(null)
+            if (summary.total <= 0) {
+                holder.progress.visibility = View.GONE
+            } else {
+                holder.progress.visibility = View.VISIBLE
+                holder.progress.progress = summary.percent
+            }
         }
         holder.card.setOnClickListener { onTaskClick(item) }
     }
 
     class TaskVH(root: View) : RecyclerView.ViewHolder(root) {
         val card: MaterialCardView = root as MaterialCardView
+        val completeCheck: MaterialCheckBox = card.findViewById(R.id.taskRowCompleteCheck)
         val title: TextView = card.findViewById(R.id.taskRowTitle)
         val status: TextView = card.findViewById(R.id.taskRowStatus)
         val due: TextView = card.findViewById(R.id.taskRowDue)

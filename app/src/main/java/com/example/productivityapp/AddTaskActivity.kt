@@ -45,6 +45,8 @@ class AddTaskActivity : AppCompatActivity() {
         }
 
         val titleInput = findViewById<EditText>(R.id.taskTitleInput)
+        val taskTypeToggle = findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.taskTypeToggle)
+        val aiSectionCard = findViewById<com.google.android.material.card.MaterialCardView>(R.id.addTaskAiSectionCard)
         val dueDateRow = findViewById<LinearLayout>(R.id.dueDateRow)
         val dueDateValue = findViewById<TextView>(R.id.dueDateValue)
         val createButton = findViewById<Button>(R.id.createTaskButton)
@@ -149,6 +151,48 @@ class AddTaskActivity : AppCompatActivity() {
             // no-op
         }
 
+        var isComplexMode = false
+
+        fun refreshTaskTypeUi() {
+            aiSectionCard.visibility = if (isComplexMode) android.view.View.VISIBLE else android.view.View.GONE
+        }
+
+        taskTypeToggle.check(R.id.taskTypeSimple)
+        refreshTaskTypeUi()
+
+        taskTypeToggle.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            isComplexMode = checkedId == R.id.taskTypeComplex
+            refreshTaskTypeUi()
+        }
+
+        fun navigateAfterCreate(taskId: String, title: String, due: LocalDateTime, status: TaskStatus) {
+            val dueDisplay = DueDateTimeFormat.displayFull(due)
+            val dueIso = TaskDueParsing.toIsoParam(due)
+            startActivity(
+                Intent(this, HomeActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra(HomeActivity.EXTRA_SELECTED_TAB, HomeActivity.TAB_TASKS)
+                }
+            )
+            startActivity(
+                Intent(this, TaskDetailActivity::class.java).apply {
+                    putExtra(TaskDetailActivity.EXTRA_TASK_ID, taskId)
+                    putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, title)
+                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
+                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_ISO, dueIso)
+                    putExtra(TaskDetailActivity.EXTRA_TASK_STATUS, status.apiValue)
+                }
+            )
+            finish()
+        }
+
+        fun finishCreating(originalText: CharSequence) {
+            createButton.isEnabled = true
+            cancelButton.isEnabled = true
+            createButton.text = originalText
+        }
+
         fun refreshDueLabel() {
             dueDateValue.text = selectedDue?.let { DueDateTimeFormat.displayFull(it) }
                 ?: getString(R.string.due_date_not_set)
@@ -216,6 +260,7 @@ class AddTaskActivity : AppCompatActivity() {
             val requirements = additionalDetailsInput.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
             val selectedDoc = selectedDocUri
             val selectedPhoto = selectedPhotoUri
+            val creatingComplex = isComplexMode
 
             createButton.isEnabled = false
             cancelButton.isEnabled = false
@@ -224,11 +269,7 @@ class AddTaskActivity : AppCompatActivity() {
 
             networkExecutor.execute {
                 val insertResult = SupabaseTasksApi.insertTask(accessToken, userId, title, due)
-                runOnUiThread {
-                    createButton.isEnabled = true
-                    cancelButton.isEnabled = true
-                    createButton.text = originalCreateText
-                }
+                runOnUiThread { finishCreating(originalCreateText) }
 
                 when (insertResult) {
                     is SupabaseTasksApi.InsertResult.Failure -> runOnUiThread {
@@ -241,6 +282,14 @@ class AddTaskActivity : AppCompatActivity() {
 
                     is SupabaseTasksApi.InsertResult.Success -> {
                         val taskId = insertResult.id
+
+                        if (!creatingComplex) {
+                            runOnUiThread {
+                                navigateAfterCreate(taskId, title, due, insertResult.status)
+                            }
+                            return@execute
+                        }
+
                         val dueIso = TaskDueParsing.toIsoParam(due)
 
                         val documentContent = selectedDoc?.let { uri ->
@@ -297,81 +346,49 @@ class AddTaskActivity : AppCompatActivity() {
                         )) {
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {
-                                runOnUiThread {
-                                    val msg = "Roadmap generation failed.\n${roadmapResult.message}"
-                                    Log.e(logTag, msg)
-                                    if (!isFinishing && !isDestroyed) {
-                                        activeDialog?.dismiss()
-                                        activeDialog = MaterialAlertDialogBuilder(this)
-                                            .setTitle("Roadmap generation failed")
-                                            .setMessage(roadmapResult.message)
-                                            .setPositiveButton(android.R.string.ok, null)
-                                            .show()
-                                    }
-                                }
+                                Log.e(logTag, "Roadmap generation failed.\n${roadmapResult.message}")
                                 JSONArray()
                             }
                         }
 
                         if (roadmapSteps.length() == 0) {
                             runOnUiThread {
-                                val msg = "Edge Function returned 0 steps. Will save empty roadmap."
-                                Log.w(logTag, msg)
+                                Log.w(logTag, "Edge Function returned 0 steps; saving as simple task.")
                                 if (!isFinishing && !isDestroyed) {
                                     activeDialog?.dismiss()
                                     activeDialog = MaterialAlertDialogBuilder(this)
-                                        .setTitle("No roadmap steps returned")
-                                        .setMessage(
-                                            "The Edge Function returned 0 steps. The task will be created, but its roadmap will be empty.\n\nCheck your Edge Function output format."
-                                        )
+                                        .setTitle(R.string.add_task_complex_fallback_title)
+                                        .setMessage(R.string.add_task_complex_fallback_message)
                                         .setPositiveButton(android.R.string.ok, null)
                                         .show()
                                 }
                             }
-                        }
-
-                        when (val patchResult = SupabaseTasksApi.updateTaskRoadmap(
-                            accessToken = accessToken,
-                            taskId = taskId,
-                            roadmapSteps = roadmapSteps
-                        )) {
-                            is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
-                                val msg = "Could not save roadmap.\n${patchResult.message}"
-                                Log.e(logTag, msg)
-                                if (!isFinishing && !isDestroyed) {
-                                    activeDialog?.dismiss()
-                                    activeDialog = MaterialAlertDialogBuilder(this)
-                                        .setTitle("Could not save roadmap")
-                                        .setMessage(patchResult.message)
-                                        .setPositiveButton(android.R.string.ok, null)
-                                        .show()
+                        } else {
+                            when (val patchResult = SupabaseTasksApi.updateTaskRoadmap(
+                                accessToken = accessToken,
+                                taskId = taskId,
+                                roadmapSteps = roadmapSteps
+                            )) {
+                                is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
+                                    val msg = "Could not save roadmap.\n${patchResult.message}"
+                                    Log.e(logTag, msg)
+                                    if (!isFinishing && !isDestroyed) {
+                                        activeDialog?.dismiss()
+                                        activeDialog = MaterialAlertDialogBuilder(this)
+                                            .setTitle("Could not save roadmap")
+                                            .setMessage(patchResult.message)
+                                            .setPositiveButton(android.R.string.ok, null)
+                                            .show()
+                                    }
                                 }
-                            }
-                            SupabaseTasksApi.PatchRoadmapResult.Success -> runOnUiThread {
-                                Log.d(logTag, "Roadmap saved for taskId=$taskId steps=${roadmapSteps.length()}")
+                                SupabaseTasksApi.PatchRoadmapResult.Success -> runOnUiThread {
+                                    Log.d(logTag, "Roadmap saved for taskId=$taskId steps=${roadmapSteps.length()}")
+                                }
                             }
                         }
 
                         runOnUiThread {
-                            val dueDisplay = DueDateTimeFormat.displayFull(due)
-                            startActivity(
-                                Intent(this, HomeActivity::class.java).apply {
-                                    addFlags(
-                                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                    )
-                                    putExtra(HomeActivity.EXTRA_SELECTED_TAB, HomeActivity.TAB_TASKS)
-                                }
-                            )
-                            startActivity(
-                                Intent(this, TaskDetailActivity::class.java).apply {
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_ID, taskId)
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, title)
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_ISO, dueIso)
-                                    putExtra(TaskDetailActivity.EXTRA_TASK_STATUS, insertResult.status.apiValue)
-                                }
-                            )
-                            finish()
+                            navigateAfterCreate(taskId, title, due, insertResult.status)
                         }
                     }
                 }

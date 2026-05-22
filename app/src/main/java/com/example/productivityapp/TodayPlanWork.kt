@@ -5,12 +5,19 @@ import java.time.ZoneId
 
 object TodayPlanWork {
 
+    const val SIMPLE_TASK_HOURS = 0.5
+
     /** True when any active task has an incomplete roadmap step scheduled before [today]. */
     fun hasIncompleteOverdueSteps(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
     ): Boolean {
         for (task in tasks) {
+            if (TaskKind.isSimpleTask(task)) {
+                val due = simpleTaskDueLocalDate(task) ?: continue
+                if (due.isBefore(today) && task.status != TaskStatus.COMPLETE) return true
+                continue
+            }
             val steps = RoadmapStep.parseList(task.roadmap)
             for (step in steps) {
                 val on = RoadmapStep.recommendedLocalDate(step) ?: continue
@@ -20,11 +27,122 @@ object TodayPlanWork {
         return false
     }
 
-    /**
-     * Steps that count toward today's progress bar: still to do (overdue or due today), plus anything
-     * checked off today. Completed overdue steps stay in the pool when finished today so the bar fills
-     * up instead of shrinking. Past completions (no [RoadmapStep.completedAt] or an earlier date) are excluded.
-     */
+    fun simpleTaskDueLocalDate(task: SupabaseTasksApi.TaskRow): LocalDate? =
+        task.dueDate?.toLocalDate()
+
+    /** Simple tasks due today or earlier (includes completed — used for scope/progress/review). */
+    fun collectSimpleTodayPlanEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<TodayPlanEntry> {
+        val out = ArrayList<TodayPlanEntry>()
+        for (task in tasks) {
+            if (!TaskKind.isSimpleTask(task)) continue
+            val due = simpleTaskDueLocalDate(task) ?: continue
+            if (due.isAfter(today)) continue
+            out.add(
+                TodayPlanEntry(
+                    task = task,
+                    step = null,
+                    stepIndex = TodayPlanEntry.SIMPLE_STEP_INDEX,
+                    recommendedOn = due,
+                    isSimple = true,
+                ),
+            )
+        }
+        return out
+    }
+
+    /** Incomplete simple tasks due after [today], plus completed ones pinned in Get ahead. */
+    fun collectSimpleFuturePlanEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+        getAheadPinnedKeys: Set<String> = emptySet(),
+    ): List<TodayPlanEntry> {
+        val out = ArrayList<TodayPlanEntry>()
+        for (task in tasks) {
+            if (!TaskKind.isSimpleTask(task)) continue
+            val due = simpleTaskDueLocalDate(task) ?: continue
+            if (!due.isAfter(today)) continue
+            val pinKey = "${task.id}:simple"
+            if (task.status == TaskStatus.COMPLETE && pinKey !in getAheadPinnedKeys) continue
+            out.add(
+                TodayPlanEntry(
+                    task = task,
+                    step = null,
+                    stepIndex = TodayPlanEntry.SIMPLE_STEP_INDEX,
+                    recommendedOn = due,
+                    isSimple = true,
+                ),
+            )
+        }
+        return out
+    }
+
+    fun collectComplexTodayPlanEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<TodayPlanEntry> {
+        val out = ArrayList<TodayPlanEntry>()
+        for (task in tasks) {
+            if (TaskKind.isSimpleTask(task)) continue
+            val steps = RoadmapStep.parseList(task.roadmap)
+            steps.forEachIndexed { index, step ->
+                val on = RoadmapStep.recommendedLocalDate(step) ?: return@forEachIndexed
+                if (on.isAfter(today)) return@forEachIndexed
+                out.add(
+                    TodayPlanEntry(
+                        task = task,
+                        step = step,
+                        stepIndex = index,
+                        recommendedOn = on,
+                        isSimple = false,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    fun collectComplexFuturePlanEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<TodayPlanEntry> {
+        val out = ArrayList<TodayPlanEntry>()
+        for (task in tasks) {
+            if (TaskKind.isSimpleTask(task)) continue
+            val steps = RoadmapStep.parseList(task.roadmap)
+            steps.forEachIndexed { index, step ->
+                val on = RoadmapStep.recommendedLocalDate(step) ?: return@forEachIndexed
+                if (!on.isAfter(today)) return@forEachIndexed
+                out.add(
+                    TodayPlanEntry(
+                        task = task,
+                        step = step,
+                        stepIndex = index,
+                        recommendedOn = on,
+                        isSimple = false,
+                    ),
+                )
+            }
+        }
+        return out
+    }
+
+    fun collectTodayPlanScopeEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+    ): List<TodayPlanEntry> =
+        collectComplexTodayPlanEntries(tasks, today) + collectSimpleTodayPlanEntries(tasks, today)
+
+    fun collectFuturePlanEntries(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        today: LocalDate,
+        getAheadPinnedKeys: Set<String> = emptySet(),
+    ): List<TodayPlanEntry> =
+        collectComplexFuturePlanEntries(tasks, today) +
+            collectSimpleFuturePlanEntries(tasks, today, getAheadPinnedKeys)
+
     fun countsTowardTodayProgress(
         step: RoadmapStep,
         recommendedOn: LocalDate,
@@ -36,9 +154,58 @@ object TodayPlanWork {
         return RoadmapStep.completionLocalDate(step, zone) == today
     }
 
+    fun simpleCountsTowardTodayProgress(
+        task: SupabaseTasksApi.TaskRow,
+        dueOn: LocalDate,
+        today: LocalDate,
+        pinnedCompleteKeys: Set<String>,
+        completedTodayTaskIds: Set<String>,
+    ): Boolean {
+        if (dueOn.isAfter(today)) return false
+        if (task.status != TaskStatus.COMPLETE) return true
+        val key = "${task.id}:simple"
+        return pinnedCompleteKeys.contains(key) || completedTodayTaskIds.contains(task.id)
+    }
+
+    fun simpleCompletedInPlanToday(
+        taskId: String,
+        pinnedCompleteKeys: Set<String>,
+        completedTodayTaskIds: Set<String>,
+    ): Boolean {
+        val key = "$taskId:simple"
+        return pinnedCompleteKeys.contains(key) || completedTodayTaskIds.contains(taskId)
+    }
+
     fun wasCompletedToday(
         step: RoadmapStep,
         today: LocalDate,
         zone: ZoneId = ZoneId.systemDefault(),
     ): Boolean = step.completed && RoadmapStep.completionLocalDate(step, zone) == today
+
+    /** All simple tasks first, then all complex steps — never under a complex task header. */
+    fun sortTodayPlanEntries(entries: List<TodayPlanEntry>, today: LocalDate): List<TodayPlanEntry> {
+        val simple = entries.filter { it.isSimple }.sortedWith(simplePlanComparator(today))
+        val complex = entries.filter { !it.isSimple }.sortedWith(complexPlanComparator(today))
+        return simple + complex
+    }
+
+    /** Within a future focus day: simple tasks first, then complex steps. */
+    fun sortFutureDayEntries(entries: List<TodayPlanEntry>): List<TodayPlanEntry> {
+        val simple = entries.filter { it.isSimple }.sortedBy { it.task.dueDate }
+        val complex = entries.filter { !it.isSimple }.sortedWith(
+            compareBy<TodayPlanEntry> { it.step!!.priority }
+                .thenByDescending { it.step!!.estimatedHours ?: -1.0 }
+                .thenBy { it.stepIndex },
+        )
+        return simple + complex
+    }
+
+    private fun simplePlanComparator(today: LocalDate): Comparator<TodayPlanEntry> =
+        compareBy<TodayPlanEntry> { !it.recommendedOn.isBefore(today) }
+            .thenBy { it.task.dueDate }
+
+    private fun complexPlanComparator(today: LocalDate): Comparator<TodayPlanEntry> =
+        compareBy<TodayPlanEntry> { !it.recommendedOn.isBefore(today) }
+            .thenBy { it.recommendedOn }
+            .thenBy { it.stepIndex }
 }
