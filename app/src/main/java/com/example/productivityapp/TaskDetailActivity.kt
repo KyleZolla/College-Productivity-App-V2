@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import org.json.JSONArray
@@ -55,6 +56,12 @@ class TaskDetailActivity : AppCompatActivity() {
     private var roadmapPatchInFlight = false
     private var statusPatchInFlight = false
     private var deleteInFlight = false
+    private var coursePatchInFlight = false
+    private var suppressCourseSelectionCallback = false
+
+    private var savedCourseId: String? = null
+    private var courseOptions: List<CourseSelectorHelper.CourseOption> = emptyList()
+    private lateinit var courseDropdown: MaterialAutoCompleteTextView
 
     private var achievementsUserId: String? = null
     private var activeTasksSnapshot: List<SupabaseTasksApi.TaskRow> = emptyList()
@@ -91,6 +98,7 @@ class TaskDetailActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.taskDetailName).text = title
         dueValue = findViewById(R.id.taskDetailDueDate)
         statusLine = findViewById(R.id.taskDetailStatusLine)
+        courseDropdown = findViewById(R.id.taskDetailCourseDropdown)
 
         editDueButton = findViewById(R.id.taskDetailEditDue)
         findViewById<MaterialButton>(R.id.taskDetailDeleteTask).setOnClickListener { confirmDeleteTask() }
@@ -114,8 +122,77 @@ class TaskDetailActivity : AppCompatActivity() {
         refreshStatusLine(savedStatus)
         refreshDueLabel()
         editDueButton?.setOnClickListener { pickDueDateTime() }
+        setupCourseSelectionListener()
 
         fetchLatestTask()
+    }
+
+    private fun setupCourseSelectionListener() {
+        courseDropdown.setOnItemClickListener { _, _, position, _ ->
+            if (suppressCourseSelectionCallback || coursePatchInFlight) return@setOnItemClickListener
+            val newId = courseOptions.getOrNull(position)?.id
+            if (newId == savedCourseId) return@setOnItemClickListener
+            persistCourseToDatabase(newId)
+        }
+    }
+
+    private fun loadCoursesForSelector(selectedCourseId: String?) {
+        val token = SessionManager.getAccessToken(this) ?: return
+        val userId = SupabaseUserId.resolveUserId(token) ?: return
+        networkExecutor.execute {
+            when (val result = SupabaseCoursesApi.listCourses(token, userId)) {
+                is SupabaseCoursesApi.ListResult.Success -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    courseOptions = CourseSelectorHelper.buildOptions(
+                        result.courses,
+                        getString(R.string.task_course_none),
+                    )
+                    suppressCourseSelectionCallback = true
+                    CourseSelectorHelper.bind(this, courseDropdown, courseOptions, selectedCourseId)
+                    suppressCourseSelectionCallback = false
+                    courseDropdown.isEnabled = !coursePatchInFlight && !deleteInFlight
+                }
+                is SupabaseCoursesApi.ListResult.Failure -> Unit
+            }
+        }
+    }
+
+    private fun persistCourseToDatabase(courseId: String?) {
+        if (coursePatchInFlight) return
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
+            return
+        }
+        coursePatchInFlight = true
+        courseDropdown.isEnabled = false
+        networkExecutor.execute {
+            when (val result = SupabaseTasksApi.updateTaskCourseId(token, taskId, courseId)) {
+                is SupabaseTasksApi.PatchCourseResult.Success -> runOnUiThread {
+                    coursePatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    savedCourseId = result.courseId
+                    suppressCourseSelectionCallback = true
+                    CourseSelectorHelper.bind(this, courseDropdown, courseOptions, savedCourseId)
+                    suppressCourseSelectionCallback = false
+                    courseDropdown.isEnabled = !deleteInFlight
+                    Toast.makeText(this, R.string.task_course_saved, Toast.LENGTH_SHORT).show()
+                }
+                is SupabaseTasksApi.PatchCourseResult.Failure -> runOnUiThread {
+                    coursePatchInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    suppressCourseSelectionCallback = true
+                    CourseSelectorHelper.bind(this, courseDropdown, courseOptions, savedCourseId)
+                    suppressCourseSelectionCallback = false
+                    courseDropdown.isEnabled = !deleteInFlight
+                    Toast.makeText(
+                        this,
+                        getString(R.string.error_task_course_update_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun confirmDeleteTask() {
@@ -139,6 +216,7 @@ class TaskDetailActivity : AppCompatActivity() {
         val deleteBtn = findViewById<MaterialButton>(R.id.taskDetailDeleteTask)
         deleteBtn.isEnabled = false
         editDueButton?.isEnabled = false
+        courseDropdown.isEnabled = false
         deleteBtn.text = getString(R.string.task_detail_deleting)
 
         networkExecutor.execute {
@@ -158,6 +236,7 @@ class TaskDetailActivity : AppCompatActivity() {
                     if (isFinishing) return@runOnUiThread
                     deleteBtn.isEnabled = true
                     editDueButton?.isEnabled = true
+                    courseDropdown.isEnabled = true
                     deleteBtn.text = getString(R.string.task_detail_delete_task)
                     Toast.makeText(
                         this,
@@ -189,6 +268,8 @@ class TaskDetailActivity : AppCompatActivity() {
                     savedDue = result.task.dueDate
                     draftDue = savedDue
                     refreshDueLabel()
+                    savedCourseId = result.task.courseId
+                    loadCoursesForSelector(savedCourseId)
 
                     roadmapSteps = RoadmapStep.parseList(result.task.roadmap).toMutableList()
                     refreshSimpleOrRoadmapUi(result.task)

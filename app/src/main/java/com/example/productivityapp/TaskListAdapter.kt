@@ -19,6 +19,13 @@ class TaskListAdapter(
     private val onTaskClick: (SupabaseTasksApi.TaskRow) -> Unit,
 ) : ListAdapter<SupabaseTasksApi.TaskRow, TaskListAdapter.TaskVH>(DIFF) {
 
+    private var courseLabelsById: Map<String, String> = emptyMap()
+
+    fun setCourseLabels(labels: Map<String, String>) {
+        courseLabelsById = labels
+        notifyDataSetChanged()
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TaskVH {
         val inflater = LayoutInflater.from(parent.context)
         val view = inflater.inflate(R.layout.item_task_row, parent, false)
@@ -47,6 +54,14 @@ class TaskListAdapter(
                 MaterialColors.getColor(holder.due, com.google.android.material.R.attr.colorOnSurfaceVariant)
             },
         )
+
+        val courseLabel = CourseSelectorHelper.labelFor(item.courseId, courseLabelsById)
+        if (courseLabel.isNullOrBlank()) {
+            holder.course.visibility = View.GONE
+        } else {
+            holder.course.visibility = View.VISIBLE
+            holder.course.text = courseLabel
+        }
 
         val isSimple = TaskKind.isSimpleTask(item)
         val summary = RoadmapProgress.summarize(item.roadmap)
@@ -79,6 +94,7 @@ class TaskListAdapter(
         val completeCheck: MaterialCheckBox = card.findViewById(R.id.taskRowCompleteCheck)
         val title: TextView = card.findViewById(R.id.taskRowTitle)
         val status: TextView = card.findViewById(R.id.taskRowStatus)
+        val course: TextView = card.findViewById(R.id.taskRowCourse)
         val due: TextView = card.findViewById(R.id.taskRowDue)
         val progress: ProgressBar = card.findViewById(R.id.taskRowProgress)
     }

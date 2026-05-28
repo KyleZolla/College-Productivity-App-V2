@@ -60,6 +60,17 @@
             android:textColor="?attr/colorOnSurfaceVariant"
             tools:text="In progress" />
 
+        <TextView
+            android:id="@+id/homeCardCourse"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:visibility="gone"
+            tools:text="Introduction to Psychology (200)"
+            tools:visibility="visible" />
+
         <ProgressBar
             android:id="@+id/homeCardProgress"
             style="?android:attr/progressBarStyleHorizontal"

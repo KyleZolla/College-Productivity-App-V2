@@ -23,6 +23,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import java.time.Instant
 import java.time.LocalDate
@@ -50,6 +51,13 @@ class HomeActivity : AppCompatActivity() {
         refreshHomeHeader()
         loadHomeUpcoming(showLoading = false)
         loadTasks(showLoading = false)
+    }
+
+    private val addCourseLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+        loadMyCourses(showLoading = false)
     }
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
@@ -108,9 +116,14 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeViewAllTasks: TextView
 
     private var achievementsUserId: String? = null
+    private var courseLabelsById: Map<String, String> = emptyMap()
 
     private lateinit var profileDisplayName: TextView
     private lateinit var profileEmail: TextView
+    private lateinit var profileCoursesLoading: ProgressBar
+    private lateinit var profileCoursesEmpty: TextView
+    private lateinit var profileCoursesList: LinearLayout
+    private var courseDeleteInFlight = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -184,6 +197,13 @@ class HomeActivity : AppCompatActivity() {
 
         profileDisplayName = findViewById(R.id.profileDisplayName)
         profileEmail = findViewById(R.id.profileEmail)
+        profileCoursesLoading = findViewById(R.id.profileCoursesLoading)
+        profileCoursesEmpty = findViewById(R.id.profileCoursesEmpty)
+        profileCoursesList = findViewById(R.id.profileCoursesList)
+
+        findViewById<MaterialButton>(R.id.addCourseButton).setOnClickListener {
+            addCourseLauncher.launch(Intent(this, AddCourseActivity::class.java))
+        }
 
         findViewById<MaterialButton>(R.id.logOutButton).setOnClickListener {
             SessionManager.clearSession(this)
@@ -226,7 +246,10 @@ class HomeActivity : AppCompatActivity() {
                 refreshHomeHeader()
                 loadHomeUpcoming(showLoading = true)
             }
-            Tab.Profile -> refreshProfileCard()
+            Tab.Profile -> {
+                refreshProfileCard()
+                loadMyCourses(showLoading = true)
+            }
         }
         val token = SessionManager.getAccessToken(this)
         if (!token.isNullOrBlank()) {
@@ -281,7 +304,10 @@ class HomeActivity : AppCompatActivity() {
                 refreshHomeHeader()
                 loadHomeUpcoming(showLoading = true)
             }
-            Tab.Profile -> refreshProfileCard()
+            Tab.Profile -> {
+                refreshProfileCard()
+                loadMyCourses(showLoading = true)
+            }
         }
 
         val primaryColor = MaterialColors.getColor(navHome, com.google.android.material.R.attr.colorPrimary)
@@ -303,11 +329,128 @@ class HomeActivity : AppCompatActivity() {
         if (token.isNullOrBlank()) {
             profileDisplayName.text = getString(R.string.profile_name_fallback)
             profileEmail.text = ""
+            profileCoursesList.removeAllViews()
+            profileCoursesEmpty.text = getString(R.string.error_task_not_signed_in)
+            profileCoursesEmpty.visibility = View.VISIBLE
+            profileCoursesLoading.visibility = View.GONE
             return
         }
         val name = AuthUserDisplayName.displayNameForProfile(token)
         profileDisplayName.text = name.ifBlank { getString(R.string.profile_name_fallback) }
         profileEmail.text = AuthUserDisplayName.emailFromAccessToken(token)
+    }
+
+    private fun loadMyCourses(showLoading: Boolean = true) {
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            profileCoursesList.removeAllViews()
+            profileCoursesEmpty.text = getString(R.string.error_task_not_signed_in)
+            profileCoursesEmpty.visibility = View.VISIBLE
+            profileCoursesLoading.visibility = View.GONE
+            return
+        }
+
+        val userId = SupabaseUserId.resolveUserId(token)
+        if (userId.isNullOrBlank()) {
+            profileCoursesList.removeAllViews()
+            profileCoursesEmpty.text = getString(R.string.error_task_user_unknown)
+            profileCoursesEmpty.visibility = View.VISIBLE
+            profileCoursesLoading.visibility = View.GONE
+            return
+        }
+
+        if (showLoading) {
+            profileCoursesLoading.visibility = View.VISIBLE
+            profileCoursesEmpty.visibility = View.GONE
+            profileCoursesList.removeAllViews()
+        }
+
+        networkExecutor.execute {
+            when (val result = SupabaseCoursesApi.listCourses(token, userId)) {
+                is SupabaseCoursesApi.ListResult.Success -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    profileCoursesLoading.visibility = View.GONE
+                    bindMyCourses(result.courses)
+                }
+                is SupabaseCoursesApi.ListResult.Failure -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    profileCoursesLoading.visibility = View.GONE
+                    profileCoursesList.removeAllViews()
+                    profileCoursesEmpty.text =
+                        getString(R.string.my_courses_load_failed) + "\n" + result.message
+                    profileCoursesEmpty.visibility = View.VISIBLE
+                    if (showLoading) {
+                        Toast.makeText(
+                            this,
+                            getString(R.string.my_courses_load_failed) + "\n" + result.message,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun bindMyCourses(courses: List<SupabaseCoursesApi.CourseRow>) {
+        profileCoursesList.removeAllViews()
+        if (courses.isEmpty()) {
+            profileCoursesEmpty.text = getString(R.string.my_courses_empty)
+            profileCoursesEmpty.visibility = View.VISIBLE
+            return
+        }
+        profileCoursesEmpty.visibility = View.GONE
+        val inflater = LayoutInflater.from(this)
+        for (course in courses) {
+            val row = inflater.inflate(R.layout.item_profile_course, profileCoursesList, false)
+            row.findViewById<TextView>(R.id.profileCourseName).text = course.name
+            row.findViewById<TextView>(R.id.profileCourseLevel).text =
+                getString(R.string.course_level_display, course.level)
+            row.findViewById<MaterialButton>(R.id.profileCourseDeleteButton).setOnClickListener {
+                confirmDeleteCourse(course)
+            }
+            profileCoursesList.addView(row)
+        }
+    }
+
+    private fun confirmDeleteCourse(course: SupabaseCoursesApi.CourseRow) {
+        if (courseDeleteInFlight) return
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.course_delete_confirm_title)
+            .setMessage(R.string.course_delete_confirm_message)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.course_delete_confirm_button) { _, _ ->
+                deleteCourseFromServer(course)
+            }
+            .show()
+    }
+
+    private fun deleteCourseFromServer(course: SupabaseCoursesApi.CourseRow) {
+        if (courseDeleteInFlight) return
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
+            return
+        }
+        courseDeleteInFlight = true
+        networkExecutor.execute {
+            when (val result = SupabaseCoursesApi.deleteCourse(token, course.id)) {
+                is SupabaseCoursesApi.DeleteResult.Success -> runOnUiThread {
+                    courseDeleteInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    Toast.makeText(this, R.string.course_deleted, Toast.LENGTH_SHORT).show()
+                    loadMyCourses(showLoading = false)
+                }
+                is SupabaseCoursesApi.DeleteResult.Failure -> runOnUiThread {
+                    courseDeleteInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    Toast.makeText(
+                        this,
+                        getString(R.string.error_course_delete_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun refreshHomeHeader() {
@@ -376,7 +519,10 @@ class HomeActivity : AppCompatActivity() {
                     }
                     val mergedForPlan = (active.tasks + extra + simpleCompletedForPlan + simpleFutureCompletedForGetAhead)
                         .distinctBy { it.id }
+                    val labels = fetchCourseLabels(token)
                     runOnUiThread {
+                        courseLabelsById = labels
+                        tasksAdapter.setCourseLabels(labels)
                         if (showLoading) homeUpcomingLoading.visibility = View.GONE
                         homeUpcomingDisplayedIds = emptyList()
                         resetHomeUpcomingPreview(active.tasks)
@@ -1654,6 +1800,7 @@ class HomeActivity : AppCompatActivity() {
         val title = root.findViewById<TextView>(R.id.homeCardTitle)
         val duePill = root.findViewById<TextView>(R.id.homeCardDuePill)
         val statusLine = root.findViewById<TextView>(R.id.homeCardStatus)
+        val courseLine = root.findViewById<TextView>(R.id.homeCardCourse)
         val progress = root.findViewById<ProgressBar>(R.id.homeCardProgress)
 
         val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
@@ -1665,6 +1812,14 @@ class HomeActivity : AppCompatActivity() {
             "$statusLabel · ${DueDateHumanLabel.wasDueDetail(this, task.dueDate)}"
         } else {
             statusLabel
+        }
+
+        val courseLabel = CourseSelectorHelper.labelFor(task.courseId, courseLabelsById)
+        if (courseLabel.isNullOrBlank()) {
+            courseLine.visibility = View.GONE
+        } else {
+            courseLine.visibility = View.VISIBLE
+            courseLine.text = courseLabel
         }
 
         val summary = RoadmapProgress.summarize(task.roadmap)
@@ -1806,8 +1961,11 @@ class HomeActivity : AppCompatActivity() {
         }
 
         networkExecutor.execute {
+            val labels = fetchCourseLabels(token)
             when (val result = SupabaseTasksApi.listTasks(token, TaskListFilter.ACTIVE)) {
                 is SupabaseTasksApi.ListResult.Success -> runOnUiThread {
+                    courseLabelsById = labels
+                    tasksAdapter.setCourseLabels(labels)
                     if (showLoading) tasksLoading.visibility = View.GONE
                     tasksAdapter.submitList(result.tasks)
                     if (result.tasks.isEmpty()) {
@@ -1836,6 +1994,14 @@ class HomeActivity : AppCompatActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun fetchCourseLabels(accessToken: String): Map<String, String> {
+        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return emptyMap()
+        return when (val result = SupabaseCoursesApi.listCourses(accessToken, userId)) {
+            is SupabaseCoursesApi.ListResult.Success -> CourseSelectorHelper.labelsById(result.courses)
+            is SupabaseCoursesApi.ListResult.Failure -> emptyMap()
         }
     }
 

@@ -10,6 +10,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.ByteArrayInputStream
 import java.nio.charset.Charset
+import java.util.zip.ZipInputStream
 
 object DocumentContentExtractor {
     sealed class Result {
@@ -30,7 +31,11 @@ object DocumentContentExtractor {
 
         val looksPdf = mime == "application/pdf" || name.lowercase().endsWith(".pdf")
 
-        // Best-effort: support text-ish files + PDF (via PdfBox-Android).
+        val looksDocx = mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.template" ||
+            name.lowercase().endsWith(".docx")
+
+        // Best-effort: support text-ish files + PDF (via PdfBox-Android) + Word (.docx).
         val looksText = mime.startsWith("text/") ||
             mime == "application/json" ||
             mime == "application/xml" ||
@@ -39,8 +44,10 @@ object DocumentContentExtractor {
             mime == "application/x-csv" ||
             mime == "text/csv"
 
-        if (!looksText && !looksPdf) {
-            return Result.Failure("Unsupported document type ($mime). Try PDF or a text-based file (txt/csv/json). File: $name")
+        if (!looksText && !looksPdf && !looksDocx) {
+            return Result.Failure(
+                "Unsupported document type ($mime). Try PDF, Word (.docx), or a text-based file (txt/csv/json). File: $name",
+            )
         }
 
         return try {
@@ -50,21 +57,62 @@ object DocumentContentExtractor {
                     return Result.Failure("Document is too large (${bytes.size} bytes). Max is ${MAX_BYTES} bytes. File: $name")
                 }
 
-                if (looksPdf) {
-                    extractPdfText(context, bytes, name)
-                } else {
-                    val text = bytes.toString(Charset.forName("UTF-8"))
-                    val trimmed = text.trim()
-                    if (trimmed.isEmpty()) {
-                        Result.Failure("Document was empty. File: $name")
-                    } else {
-                        Result.Success(trimmed.take(MAX_CHARS))
+                when {
+                    looksPdf -> extractPdfText(context, bytes, name)
+                    looksDocx -> extractDocxText(bytes, name)
+                    else -> {
+                        val text = bytes.toString(Charset.forName("UTF-8"))
+                        val trimmed = text.trim()
+                        if (trimmed.isEmpty()) {
+                            Result.Failure("Document was empty. File: $name")
+                        } else {
+                            Result.Success(trimmed.take(MAX_CHARS))
+                        }
                     }
                 }
             } ?: Result.Failure("Could not open the document.")
         } catch (e: Exception) {
             Result.Failure(e.message ?: "Failed to read document.")
         }
+    }
+
+    private fun extractDocxText(bytes: ByteArray, name: String): Result {
+        return try {
+            val documentXml = readZipEntryText(bytes, "word/document.xml")
+                ?: return Result.Failure("Could not read Word document structure. File: $name")
+            val text = extractWordDocumentXmlText(documentXml)
+            if (text.isBlank()) {
+                Result.Failure("Could not extract text from Word document. File: $name")
+            } else {
+                Result.Success(text.take(MAX_CHARS))
+            }
+        } catch (e: Exception) {
+            Result.Failure("Failed to read Word document: ${e.message ?: "unknown error"}. File: $name")
+        }
+    }
+
+    /** Pull plain text from WordprocessingML (`word/document.xml` inside a .docx zip). */
+    internal fun extractWordDocumentXmlText(xml: String): String {
+        val paragraphPattern = Regex("<w:p[\\s>][\\s\\S]*?</w:p>")
+        val textRunPattern = Regex("<w:t(?:\\s[^>]*)?>([^<]*)</w:t>")
+        val lines = paragraphPattern.findAll(xml).map { match ->
+            textRunPattern.findAll(match.value).joinToString("") { it.groupValues[1] }
+        }.filter { it.isNotEmpty() }
+        return lines.joinToString("\n").trim()
+    }
+
+    private fun readZipEntryText(bytes: ByteArray, entryPath: String): String? {
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                if (entry.name == entryPath) {
+                    return zip.readBytes().toString(Charsets.UTF_8)
+                }
+                zip.closeEntry()
+                entry = zip.nextEntry
+            }
+        }
+        return null
     }
 
     private fun extractPdfText(context: Context, bytes: ByteArray, name: String): Result {

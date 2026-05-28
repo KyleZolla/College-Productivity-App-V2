@@ -170,4 +170,40 @@
     <string name="add_task_ai_questions_difficulty_hard">Hard</string>
     <string name="add_task_ai_questions_additional_details_label">Additional details</string>
     <string name="add_task_ai_questions_additional_details_hint">Anything important (requirements, length, topics, constraints)…</string>
+
+    <string name="my_courses_label">My Courses</string>
+    <string name="my_courses_empty">No courses yet. Tap Add to create one.</string>
+    <string name="my_courses_load_failed">Could not load courses.</string>
+    <string name="add_course">Add</string>
+    <string name="add_course_title">Add course</string>
+    <string name="save_course">Save</string>
+    <string name="status_saving_course">Saving…</string>
+    <string name="course_name_hint">Course name</string>
+    <string name="course_level_label">Course level</string>
+    <string name="course_level_100">100</string>
+    <string name="course_level_200">200</string>
+    <string name="course_level_300">300</string>
+    <string name="course_level_400">400</string>
+    <string name="course_level_graduate">Graduate</string>
+    <string name="course_level_display">Level %1$s</string>
+    <string name="course_syllabus_label">Syllabus upload</string>
+    <string name="course_syllabus_subtitle">Optional — upload a document or photo to extract syllabus text</string>
+    <string name="course_syllabus_none">No file selected</string>
+    <string name="course_syllabus_doc_and_photo_selected">Document: %1$s\nPhoto: %2$s</string>
+    <string name="course_syllabus_extract_skipped_title">Syllabus upload skipped</string>
+    <string name="course_delete">Delete</string>
+    <string name="course_delete_confirm_title">Delete this course?</string>
+    <string name="course_delete_confirm_message">Tasks linked to this course will be unlinked. This can\'t be undone.</string>
+    <string name="course_delete_confirm_button">Delete</string>
+    <string name="course_deleting">Deleting…</string>
+    <string name="course_deleted">Course deleted.</string>
+    <string name="error_course_delete_failed">Could not delete course.</string>
+    <string name="error_course_name_required">Enter a course name.</string>
+    <string name="error_course_level_required">Select a course level.</string>
+    <string name="error_course_save_failed">Could not save course.</string>
+
+    <string name="task_course_label">Course</string>
+    <string name="task_course_none">No course</string>
+    <string name="task_course_saved">Course saved.</string>
+    <string name="error_task_course_update_failed">Could not update course.</string>
 </resources>

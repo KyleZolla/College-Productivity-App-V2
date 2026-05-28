@@ -17,6 +17,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import java.time.LocalDate
@@ -31,6 +32,8 @@ class AddTaskActivity : AppCompatActivity() {
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private val logTag = "AddTaskActivity"
     private var activeDialog: AlertDialog? = null
+    private var courseOptions: List<CourseSelectorHelper.CourseOption> = emptyList()
+    private lateinit var courseDropdown: MaterialAutoCompleteTextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +54,7 @@ class AddTaskActivity : AppCompatActivity() {
         val dueDateValue = findViewById<TextView>(R.id.dueDateValue)
         val createButton = findViewById<Button>(R.id.createTaskButton)
         val cancelButton = findViewById<Button>(R.id.cancelAddTaskButton)
+        courseDropdown = findViewById(R.id.taskCourseDropdown)
 
         var selectedDue: LocalDateTime? = null
 
@@ -231,6 +235,9 @@ class AddTaskActivity : AppCompatActivity() {
             ).show()
         }
 
+        refreshDueLabel()
+        loadCoursesForSelector()
+
         createButton.setOnClickListener {
             val title = titleInput.text.toString().trim()
             val due = selectedDue
@@ -261,6 +268,7 @@ class AddTaskActivity : AppCompatActivity() {
             val selectedDoc = selectedDocUri
             val selectedPhoto = selectedPhotoUri
             val creatingComplex = isComplexMode
+            val selectedCourseId = CourseSelectorHelper.selectedCourseId(courseDropdown, courseOptions)
 
             createButton.isEnabled = false
             cancelButton.isEnabled = false
@@ -268,7 +276,13 @@ class AddTaskActivity : AppCompatActivity() {
             createButton.text = getString(R.string.status_creating_task)
 
             networkExecutor.execute {
-                val insertResult = SupabaseTasksApi.insertTask(accessToken, userId, title, due)
+                val insertResult = SupabaseTasksApi.insertTask(
+                    accessToken,
+                    userId,
+                    title,
+                    due,
+                    selectedCourseId,
+                )
                 runOnUiThread { finishCreating(originalCreateText) }
 
                 when (insertResult) {
@@ -397,6 +411,24 @@ class AddTaskActivity : AppCompatActivity() {
 
         cancelButton.setOnClickListener {
             finish()
+        }
+    }
+
+    private fun loadCoursesForSelector() {
+        val accessToken = SessionManager.getAccessToken(this) ?: return
+        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return
+        networkExecutor.execute {
+            when (val result = SupabaseCoursesApi.listCourses(accessToken, userId)) {
+                is SupabaseCoursesApi.ListResult.Success -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    courseOptions = CourseSelectorHelper.buildOptions(
+                        result.courses,
+                        getString(R.string.task_course_none),
+                    )
+                    CourseSelectorHelper.bind(this, courseDropdown, courseOptions, selectedCourseId = null)
+                }
+                is SupabaseCoursesApi.ListResult.Failure -> Unit
+            }
         }
     }
 

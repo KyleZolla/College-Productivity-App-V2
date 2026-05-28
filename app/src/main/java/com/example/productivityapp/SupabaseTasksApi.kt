@@ -25,7 +25,7 @@ enum class TaskListFilter {
 
 /**
  * `tasks` table via PostgREST.
- * Columns: id, userId, title, dueDate, status, roadmap, completedAt.
+ * Columns: id, userId, title, dueDate, status, roadmap, completedAt, courseId.
  * `dueDate` is expected as `timestamptz` in Postgres (ISO-8601 with offset on write).
  *
  * `status` must match your DB (e.g. "Not Started", "In Progress", "Complete").
@@ -39,6 +39,7 @@ object SupabaseTasksApi {
         val status: TaskStatus,
         val roadmap: JSONArray?,
         val completedAt: String? = null,
+        val courseId: String? = null,
     )
 
     sealed class ListResult {
@@ -66,6 +67,11 @@ object SupabaseTasksApi {
         data class Failure(val message: String) : PatchDueResult()
     }
 
+    sealed class PatchCourseResult {
+        data class Success(val courseId: String?) : PatchCourseResult()
+        data class Failure(val message: String) : PatchCourseResult()
+    }
+
     sealed class PatchRoadmapResult {
         object Success : PatchRoadmapResult()
         data class Failure(val message: String) : PatchRoadmapResult()
@@ -74,6 +80,11 @@ object SupabaseTasksApi {
     sealed class DeleteResult {
         object Success : DeleteResult()
         data class Failure(val message: String) : DeleteResult()
+    }
+
+    sealed class ClearCourseIdResult {
+        object Success : ClearCourseIdResult()
+        data class Failure(val message: String) : ClearCourseIdResult()
     }
 
     private fun parseError(body: String, code: Int): String {
@@ -114,7 +125,7 @@ object SupabaseTasksApi {
                 TaskListFilter.DELETED -> "order=deletedAt.desc.nullslast"
                 else -> "order=dueDate.asc.nullslast"
             }
-            val query = "select=id,title,dueDate,status,roadmap,completedAt&$filterParams&$orderParam"
+            val query = "select=id,title,dueDate,status,roadmap,completedAt,courseId&$filterParams&$orderParam"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -173,7 +184,17 @@ object SupabaseTasksApi {
             status = status,
             roadmap = roadmap,
             completedAt = parseCompletedAt(completedAtRaw),
+            courseId = parseCourseId(obj),
         )
+    }
+
+    private fun parseCourseId(obj: JSONObject): String? {
+        val raw = when {
+            obj.has("courseId") && !obj.isNull("courseId") -> obj.get("courseId")
+            obj.has("course_id") && !obj.isNull("course_id") -> obj.get("course_id")
+            else -> null
+        }
+        return raw?.toString()?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun parseDueDate(raw: Any?): LocalDateTime? {
@@ -266,7 +287,7 @@ object SupabaseTasksApi {
         if (idFilter.isEmpty()) return GetResult.Failure("Missing task id.")
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
-            val query = "select=id,title,dueDate,status,roadmap,completedAt&id=eq.$idFilter"
+            val query = "select=id,title,dueDate,status,roadmap,completedAt,courseId&id=eq.$idFilter"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -299,6 +320,7 @@ object SupabaseTasksApi {
         userId: String,
         title: String,
         dueDate: LocalDateTime,
+        courseId: String? = null,
     ): InsertResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return InsertResult.Failure("Missing Supabase config.")
@@ -322,6 +344,11 @@ object SupabaseTasksApi {
                 .put("dueDate", TaskDueParsing.toIsoParam(dueDate))
                 .put("status", TaskStatus.NOT_STARTED.apiValue)
                 .put("created_at", Instant.now().toString())
+            if (courseId.isNullOrBlank()) {
+                payload.put("courseId", JSONObject.NULL)
+            } else {
+                payload.put("courseId", courseId)
+            }
 
             connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
 
@@ -460,6 +487,75 @@ object SupabaseTasksApi {
         }
     }
 
+    fun updateTaskCourseId(accessToken: String, taskId: String, courseId: String?): PatchCourseResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return PatchCourseResult.Failure("Missing Supabase config.")
+        }
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val idFilter = taskId.trim()
+            if (idFilter.isEmpty()) {
+                return PatchCourseResult.Failure("Missing task id.")
+            }
+            val url = URL("$base/rest/v1/tasks?id=eq.$idFilter")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=representation")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject().apply {
+                if (courseId.isNullOrBlank()) put("courseId", JSONObject.NULL) else put("courseId", courseId)
+            }
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode in 200..299) {
+                val trimmed = responseBody.trim()
+                if (trimmed == "[]") {
+                    return PatchCourseResult.Failure("No row was updated.")
+                }
+                val confirmed = parseCourseIdFromPatchResponse(responseBody)
+                PatchCourseResult.Success(confirmed)
+            } else {
+                PatchCourseResult.Failure(parseError(responseBody, responseCode))
+            }
+        } catch (e: Exception) {
+            PatchCourseResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
+    private fun parseCourseIdFromPatchResponse(body: String): String? {
+        if (body.isBlank()) return null
+        return try {
+            val trimmed = body.trim()
+            val row = when {
+                trimmed.startsWith("[") -> {
+                    val arr = JSONArray(trimmed)
+                    if (arr.length() == 0) return null
+                    arr.getJSONObject(0)
+                }
+                trimmed.startsWith("{") -> JSONObject(trimmed)
+                else -> return null
+            }
+            parseCourseId(row)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun updateTaskRoadmap(accessToken: String, taskId: String, roadmapSteps: JSONArray): PatchRoadmapResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return PatchRoadmapResult.Failure("Missing Supabase config.")
@@ -500,6 +596,49 @@ object SupabaseTasksApi {
             }
         } catch (e: Exception) {
             PatchRoadmapResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
+    /** Sets `courseId` to null on all tasks referencing [courseId]. */
+    fun clearCourseIdOnTasks(accessToken: String, courseId: String): ClearCourseIdResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return ClearCourseIdResult.Failure("Missing Supabase config.")
+        }
+        val idFilter = courseId.trim()
+        if (idFilter.isEmpty()) return ClearCourseIdResult.Failure("Missing course id.")
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val enc = URLEncoder.encode(idFilter, StandardCharsets.UTF_8.name())
+            val url = URL("$base/rest/v1/tasks?courseId=eq.$enc")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=minimal")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject().put("courseId", JSONObject.NULL)
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode in 200..299) {
+                ClearCourseIdResult.Success
+            } else {
+                ClearCourseIdResult.Failure(parseError(responseBody, responseCode))
+            }
+        } catch (e: Exception) {
+            ClearCourseIdResult.Failure(e.message ?: "Network error.")
         }
     }
 
