@@ -25,7 +25,7 @@ enum class TaskListFilter {
 
 /**
  * `tasks` table via PostgREST.
- * Columns: id, userId, title, dueDate, status, created_at.
+ * Columns: id, userId, title, dueDate, status, roadmap, completedAt.
  * `dueDate` is expected as `timestamptz` in Postgres (ISO-8601 with offset on write).
  *
  * `status` must match your DB (e.g. "Not Started", "In Progress", "Complete").
@@ -38,6 +38,7 @@ object SupabaseTasksApi {
         val dueDate: LocalDateTime?,
         val status: TaskStatus,
         val roadmap: JSONArray?,
+        val completedAt: String? = null,
     )
 
     sealed class ListResult {
@@ -56,7 +57,7 @@ object SupabaseTasksApi {
     }
 
     sealed class PatchResult {
-        data class Success(val status: TaskStatus) : PatchResult()
+        data class Success(val status: TaskStatus, val completedAt: String?) : PatchResult()
         data class Failure(val message: String) : PatchResult()
     }
 
@@ -113,7 +114,7 @@ object SupabaseTasksApi {
                 TaskListFilter.DELETED -> "order=deletedAt.desc.nullslast"
                 else -> "order=dueDate.asc.nullslast"
             }
-            val query = "select=id,title,dueDate,status,roadmap&$filterParams&$orderParam"
+            val query = "select=id,title,dueDate,status,roadmap,completedAt&$filterParams&$orderParam"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -133,18 +134,7 @@ object SupabaseTasksApi {
                 val arr = JSONArray(responseBody)
                 val out = ArrayList<TaskRow>(arr.length())
                 for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    val id = obj.opt("id")?.toString()?.takeIf { it.isNotBlank() } ?: continue
-                    val title = obj.optString("title")
-                    val due = parseDueDate(obj.opt("dueDate"))
-                    val status = TaskStatus.fromApi(
-                        when {
-                            !obj.has("status") || obj.isNull("status") -> null
-                            else -> obj.getString("status")
-                        }
-                    )
-                    val roadmap = parseRoadmap(obj.opt("roadmap"))
-                    out.add(TaskRow(id = id, title = title, dueDate = due, status = status, roadmap = roadmap))
+                    parseTaskRow(arr.getJSONObject(i))?.let { out.add(it) }
                 }
                 ListResult.Success(out)
             } else {
@@ -153,6 +143,37 @@ object SupabaseTasksApi {
         } catch (e: Exception) {
             ListResult.Failure(e.message ?: "Network error.")
         }
+    }
+
+    private fun parseCompletedAt(raw: Any?): String? {
+        if (raw == null || raw == JSONObject.NULL) return null
+        return raw.toString().trim().takeIf { it.isNotEmpty() }
+    }
+
+    private fun parseTaskRow(obj: JSONObject): TaskRow? {
+        val id = obj.opt("id")?.toString()?.takeIf { it.isNotBlank() } ?: return null
+        val title = obj.optString("title")
+        val due = parseDueDate(obj.opt("dueDate"))
+        val status = TaskStatus.fromApi(
+            when {
+                !obj.has("status") || obj.isNull("status") -> null
+                else -> obj.getString("status")
+            }
+        )
+        val roadmap = parseRoadmap(obj.opt("roadmap"))
+        val completedAtRaw = when {
+            obj.has("completedAt") && !obj.isNull("completedAt") -> obj.get("completedAt")
+            obj.has("completed_at") && !obj.isNull("completed_at") -> obj.get("completed_at")
+            else -> null
+        }
+        return TaskRow(
+            id = id,
+            title = title,
+            dueDate = due,
+            status = status,
+            roadmap = roadmap,
+            completedAt = parseCompletedAt(completedAtRaw),
+        )
     }
 
     private fun parseDueDate(raw: Any?): LocalDateTime? {
@@ -204,37 +225,38 @@ object SupabaseTasksApi {
         }
     }
 
-    private fun parseStatusFromPatchResponse(body: String): TaskStatus? {
+    private fun parseStatusAndCompletedAtFromPatchResponse(body: String): Pair<TaskStatus, String?>? {
         if (body.isBlank()) return null
         return try {
             val trimmed = body.trim()
-            when {
+            val row = when {
                 trimmed.startsWith("[") -> {
                     val arr = JSONArray(trimmed)
                     if (arr.length() == 0) return null
-                    val row = arr.getJSONObject(0)
-                    TaskStatus.fromApi(
-                        when {
-                            !row.has("status") || row.isNull("status") -> null
-                            else -> row.getString("status")
-                        }
-                    )
+                    arr.getJSONObject(0)
                 }
-                trimmed.startsWith("{") -> {
-                    val row = JSONObject(trimmed)
-                    TaskStatus.fromApi(
-                        when {
-                            !row.has("status") || row.isNull("status") -> null
-                            else -> row.getString("status")
-                        }
-                    )
+                trimmed.startsWith("{") -> JSONObject(trimmed)
+                else -> return null
+            }
+            val status = TaskStatus.fromApi(
+                when {
+                    !row.has("status") || row.isNull("status") -> null
+                    else -> row.getString("status")
                 }
+            ) ?: return null
+            val completedAtRaw = when {
+                row.has("completedAt") && !row.isNull("completedAt") -> row.get("completedAt")
+                row.has("completed_at") && !row.isNull("completed_at") -> row.get("completed_at")
                 else -> null
             }
+            status to parseCompletedAt(completedAtRaw)
         } catch (_: Exception) {
             null
         }
     }
+
+    private fun parseStatusFromPatchResponse(body: String): TaskStatus? =
+        parseStatusAndCompletedAtFromPatchResponse(body)?.first
 
     fun getTask(accessToken: String, taskId: String): GetResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
@@ -244,7 +266,7 @@ object SupabaseTasksApi {
         if (idFilter.isEmpty()) return GetResult.Failure("Missing task id.")
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
-            val query = "select=id,title,dueDate,status,roadmap&id=eq.$idFilter"
+            val query = "select=id,title,dueDate,status,roadmap,completedAt&id=eq.$idFilter"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -265,18 +287,8 @@ object SupabaseTasksApi {
             }
             val arr = JSONArray(responseBody)
             if (arr.length() == 0) return GetResult.Failure("Task not found.")
-            val obj = arr.getJSONObject(0)
-            val id = obj.opt("id")?.toString()?.takeIf { it.isNotBlank() } ?: return GetResult.Failure("Task missing id.")
-            val title = obj.optString("title")
-            val due = parseDueDate(obj.opt("dueDate"))
-            val status = TaskStatus.fromApi(
-                when {
-                    !obj.has("status") || obj.isNull("status") -> null
-                    else -> obj.getString("status")
-                }
-            )
-            val roadmap = parseRoadmap(obj.opt("roadmap"))
-            GetResult.Success(TaskRow(id = id, title = title, dueDate = due, status = status, roadmap = roadmap))
+            parseTaskRow(arr.getJSONObject(0))?.let { GetResult.Success(it) }
+                ?: GetResult.Failure("Task missing id.")
         } catch (e: Exception) {
             GetResult.Failure(e.message ?: "Network error.")
         }
@@ -365,6 +377,11 @@ object SupabaseTasksApi {
             connection.doOutput = true
 
             val payload = JSONObject().put("status", status.apiValue)
+            if (status == TaskStatus.COMPLETE) {
+                payload.put("completedAt", Instant.now().toString())
+            } else {
+                payload.put("completedAt", JSONObject.NULL)
+            }
             val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(bodyBytes.size)
             connection.outputStream.use { it.write(bodyBytes) }
@@ -380,8 +397,11 @@ object SupabaseTasksApi {
                 if (trimmed == "[]") {
                     return PatchResult.Failure("No row was updated.")
                 }
-                val confirmed = parseStatusFromPatchResponse(responseBody) ?: status
-                PatchResult.Success(confirmed)
+                val parsed = parseStatusAndCompletedAtFromPatchResponse(responseBody)
+                val confirmedStatus = parsed?.first ?: status
+                val confirmedCompletedAt = parsed?.second
+                    ?: if (status == TaskStatus.COMPLETE) Instant.now().toString() else null
+                PatchResult.Success(confirmedStatus, confirmedCompletedAt)
             } else {
                 PatchResult.Failure(parseError(responseBody, responseCode))
             }

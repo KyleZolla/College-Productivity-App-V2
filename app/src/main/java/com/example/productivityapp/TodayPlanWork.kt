@@ -1,11 +1,32 @@
 package com.example.productivityapp
 
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
 object TodayPlanWork {
 
     const val SIMPLE_TASK_HOURS = 0.5
+
+    /** Calendar day (device zone) when the task was marked complete, if [TaskRow.completedAt] is set. */
+    fun taskCompletionLocalDate(
+        task: SupabaseTasksApi.TaskRow,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): LocalDate? {
+        val raw = task.completedAt?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        return try {
+            Instant.parse(raw).atZone(zone).toLocalDate()
+        } catch (_: Exception) {
+            runCatching { LocalDate.parse(raw.take(10)) }.getOrNull()
+        }
+    }
+
+    fun wasTaskCompletedToday(
+        task: SupabaseTasksApi.TaskRow,
+        today: LocalDate,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): Boolean = taskCompletionLocalDate(task, zone) == today
 
     /** True when any active task has an incomplete roadmap step scheduled before [today]. */
     fun hasIncompleteOverdueSteps(
@@ -65,7 +86,12 @@ object TodayPlanWork {
             val due = simpleTaskDueLocalDate(task) ?: continue
             if (!due.isAfter(today)) continue
             val pinKey = "${task.id}:simple"
-            if (task.status == TaskStatus.COMPLETE && pinKey !in getAheadPinnedKeys) continue
+            if (task.status == TaskStatus.COMPLETE &&
+                pinKey !in getAheadPinnedKeys &&
+                !wasTaskCompletedToday(task, today)
+            ) {
+                continue
+            }
             out.add(
                 TodayPlanEntry(
                     task = task,
@@ -158,22 +184,11 @@ object TodayPlanWork {
         task: SupabaseTasksApi.TaskRow,
         dueOn: LocalDate,
         today: LocalDate,
-        pinnedCompleteKeys: Set<String>,
-        completedTodayTaskIds: Set<String>,
+        zone: ZoneId = ZoneId.systemDefault(),
     ): Boolean {
         if (dueOn.isAfter(today)) return false
         if (task.status != TaskStatus.COMPLETE) return true
-        val key = "${task.id}:simple"
-        return pinnedCompleteKeys.contains(key) || completedTodayTaskIds.contains(task.id)
-    }
-
-    fun simpleCompletedInPlanToday(
-        taskId: String,
-        pinnedCompleteKeys: Set<String>,
-        completedTodayTaskIds: Set<String>,
-    ): Boolean {
-        val key = "$taskId:simple"
-        return pinnedCompleteKeys.contains(key) || completedTodayTaskIds.contains(taskId)
+        return wasTaskCompletedToday(task, today, zone)
     }
 
     fun wasCompletedToday(

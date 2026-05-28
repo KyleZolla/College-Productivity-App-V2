@@ -101,10 +101,8 @@ class HomeActivity : AppCompatActivity() {
     private var homeTodayPlanExpanded = false
     private val homeCompletedReviewDaysExpanded = mutableSetOf<String>()
     private val homeTodayPlanPinnedCheckedKeys = mutableSetOf<String>()
-    /** Simple tasks marked complete via Today's Plan today (session); keeps them in the plan after reload. */
-    private val homeSimpleCompletedTodayIds = mutableSetOf<String>()
-    private var homeGetAheadFocusDate: LocalDate? = null
     private val homeGetAheadPinnedCheckedKeys = mutableSetOf<String>()
+    private var homeGetAheadFocusDate: LocalDate? = null
     private lateinit var homeUpcomingEmpty: TextView
     private lateinit var homeUpcomingCards: LinearLayout
     private lateinit var homeViewAllTasks: TextView
@@ -363,11 +361,7 @@ class HomeActivity : AppCompatActivity() {
                     val simpleCompletedForPlan = when (completedAll) {
                         is SupabaseTasksApi.ListResult.Success -> completedAll.tasks.filter { task ->
                             TaskKind.isSimpleTask(task) &&
-                                TodayPlanWork.simpleCompletedInPlanToday(
-                                    task.id,
-                                    homeTodayPlanPinnedCheckedKeys,
-                                    homeSimpleCompletedTodayIds,
-                                ) &&
+                                TodayPlanWork.wasTaskCompletedToday(task, today) &&
                                 TodayPlanWork.simpleTaskDueLocalDate(task)?.let { !it.isAfter(today) } == true
                         }
                         is SupabaseTasksApi.ListResult.Failure -> emptyList()
@@ -376,7 +370,7 @@ class HomeActivity : AppCompatActivity() {
                         is SupabaseTasksApi.ListResult.Success -> completedAll.tasks.filter { task ->
                             TaskKind.isSimpleTask(task) &&
                                 TodayPlanWork.simpleTaskDueLocalDate(task)?.isAfter(today) == true &&
-                                "${task.id}:simple" in homeGetAheadPinnedCheckedKeys
+                                TodayPlanWork.wasTaskCompletedToday(task, today)
                         }
                         is SupabaseTasksApi.ListResult.Failure -> emptyList()
                     }
@@ -433,7 +427,8 @@ class HomeActivity : AppCompatActivity() {
         val incompleteOverdue = scope.filter { it.recommendedOn.isBefore(today) && !it.isCompleted }
         val todayEntries = scope.filter { entry ->
             when {
-                entry.isSimple -> entry.recommendedOn == today && !entry.isCompleted
+                // Match complex steps: keep simple tasks due today visible after check-off (pinned/review).
+                entry.isSimple -> entry.recommendedOn == today
                 else -> entry.recommendedOn == today
             }
         }
@@ -449,16 +444,13 @@ class HomeActivity : AppCompatActivity() {
         today: LocalDate,
     ): List<TodayPlanEntry> {
         val zone = ZoneId.systemDefault()
-        val pinned = homeTodayPlanPinnedCheckedKeys
-        val completedToday = homeSimpleCompletedTodayIds
         return todayPlanScopeEntries(tasks, today).filter { entry ->
             if (entry.isSimple) {
                 TodayPlanWork.simpleCountsTowardTodayProgress(
                     entry.task,
                     entry.recommendedOn,
                     today,
-                    pinned,
-                    completedToday,
+                    zone,
                 )
             } else {
                 TodayPlanWork.countsTowardTodayProgress(entry.step!!, entry.recommendedOn, today, zone)
@@ -482,12 +474,9 @@ class HomeActivity : AppCompatActivity() {
         today: LocalDate,
     ): List<TodayPlanEntry> {
         val zone = ZoneId.systemDefault()
-        val pinned = homeTodayPlanPinnedCheckedKeys
-        val completedToday = homeSimpleCompletedTodayIds
         return todayPlanScopeEntries(tasks, today).filter { entry ->
             when {
-                entry.isSimple -> entry.isCompleted &&
-                    TodayPlanWork.simpleCompletedInPlanToday(entry.task.id, pinned, completedToday)
+                entry.isSimple -> TodayPlanWork.wasTaskCompletedToday(entry.task, today, zone)
                 else -> TodayPlanWork.wasCompletedToday(entry.step!!, today, zone)
             }
         }
@@ -687,12 +676,21 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    private fun isPlanEntryCompletedToday(entry: TodayPlanEntry, today: LocalDate): Boolean {
+        val zone = ZoneId.systemDefault()
+        return when {
+            entry.isSimple -> TodayPlanWork.wasTaskCompletedToday(entry.task, today, zone)
+            else -> TodayPlanWork.wasCompletedToday(entry.step!!, today, zone)
+        }
+    }
+
     private fun buildCollapsedVisibleEntries(
-        entries: List<TodayPlanEntry>,
+        workEntries: List<TodayPlanEntry>,
+        scopeEntries: List<TodayPlanEntry>,
         today: LocalDate,
     ): List<TodayPlanEntry> {
-        prunePinnedTodayPlanKeys(entries)
-        val sorted = sortTodayPlanEntries(entries, today)
+        prunePinnedTodayPlanKeys(scopeEntries)
+        val sorted = sortTodayPlanEntries(workEntries, today)
         val pinnedKeys = homeTodayPlanPinnedCheckedKeys
         var uncheckedShown = 0
         val out = ArrayList<TodayPlanEntry>()
@@ -702,7 +700,10 @@ class HomeActivity : AppCompatActivity() {
                     out.add(entry)
                     uncheckedShown++
                 }
-                entry.isCompleted && todayPlanEntryKey(entry) in pinnedKeys -> out.add(entry)
+                entry.isCompleted && (
+                    todayPlanEntryKey(entry) in pinnedKeys ||
+                        isPlanEntryCompletedToday(entry, today)
+                    ) -> out.add(entry)
             }
         }
         return out.sortedWith(compareBy({ !it.isSimple }, { sorted.indexOfFirst { e -> todayPlanEntryKey(e) == todayPlanEntryKey(it) } }))
@@ -1067,6 +1068,7 @@ class HomeActivity : AppCompatActivity() {
         homeTasksSnapshot = allActiveTasks
         homeTodayPlanSection.visibility = View.VISIBLE
         val today = LocalDate.now()
+        val scopeEntries = todayPlanScopeEntries(allActiveTasks, today)
         val workEntries = todayPlanWorkEntries(allActiveTasks, today)
         val progressEntries = todayPlanProgressEntries(allActiveTasks, today)
         val hasIncomplete = workEntries.any { !it.isCompleted }
@@ -1091,7 +1093,7 @@ class HomeActivity : AppCompatActivity() {
             homeTodayPlanEmpty.visibility = View.GONE
             homeTodayPlanGroups.visibility = View.VISIBLE
             val sorted = sortTodayPlanEntries(workEntries, today)
-            val collapsedVisible = buildCollapsedVisibleEntries(workEntries, today)
+            val collapsedVisible = buildCollapsedVisibleEntries(workEntries, scopeEntries, today)
             val visibleEntries = if (homeTodayPlanExpanded) sorted else collapsedVisible
             val showToggle = homeTodayPlanExpanded || collapsedVisible.size < sorted.size
             homeTodayPlanToggle.visibility = if (showToggle) View.VISIBLE else View.GONE
@@ -1178,7 +1180,6 @@ class HomeActivity : AppCompatActivity() {
         val hadOverdueBefore = TodayPlanWork.hasIncompleteOverdueSteps(beforeSnapshot, today)
 
         if (checked) {
-            homeSimpleCompletedTodayIds.add(taskId)
             if (isFutureDue) {
                 homeGetAheadPinnedCheckedKeys.add(pinKey)
             } else {
@@ -1187,18 +1188,18 @@ class HomeActivity : AppCompatActivity() {
         } else {
             homeTodayPlanPinnedCheckedKeys.remove(pinKey)
             homeGetAheadPinnedCheckedKeys.remove(pinKey)
-            homeSimpleCompletedTodayIds.remove(taskId)
         }
 
         homeRoadmapPatchInFlight = true
+        val completedAt = if (checked) Instant.now().toString() else null
         homeTasksSnapshot = homeTasksSnapshot.map { row ->
-            if (row.id == taskId) row.copy(status = targetStatus) else row
+            if (row.id == taskId) row.copy(status = targetStatus, completedAt = completedAt) else row
         }
         bindHomeTodayPlan(homeTasksSnapshot)
         if (checked) {
             updateHomeUpcomingPreview(homeTasksSnapshot, newlyCompletedTaskId = taskId)
         } else {
-            refreshHomeUpcomingPreview(homeTasksSnapshot)
+            updateHomeUpcomingPreview(homeTasksSnapshot, newlyUncompletedTaskId = taskId)
         }
 
         var planCompleteFired = false
@@ -1254,13 +1255,17 @@ class HomeActivity : AppCompatActivity() {
                     homeRoadmapPatchInFlight = false
                     if (isFinishing) return@runOnUiThread
                     homeTasksSnapshot = homeTasksSnapshot.map { row ->
-                        if (row.id == taskId) row.copy(status = result.status) else row
+                        if (row.id == taskId) {
+                            row.copy(status = result.status, completedAt = result.completedAt)
+                        } else {
+                            row
+                        }
                     }
                     bindHomeTodayPlan(homeTasksSnapshot)
                     if (checked) {
                         updateHomeUpcomingPreview(homeTasksSnapshot, newlyCompletedTaskId = taskId)
                     } else {
-                        refreshHomeUpcomingPreview(homeTasksSnapshot)
+                        updateHomeUpcomingPreview(homeTasksSnapshot, newlyUncompletedTaskId = taskId)
                     }
                     if (currentTab == Tab.Tasks) {
                         loadTasks(showLoading = false)
@@ -1356,15 +1361,28 @@ class HomeActivity : AppCompatActivity() {
         val previousStatus = task.status
         val derived = deriveStatusFromSteps(steps)
         val newRoadmap = RoadmapStep.toJsonArray(steps)
+        val taskCompletedAt = when {
+            derived == TaskStatus.COMPLETE && previousStatus != TaskStatus.COMPLETE ->
+                Instant.now().toString()
+            derived != TaskStatus.COMPLETE -> null
+            else -> task.completedAt
+        }
         homeTasksSnapshot = homeTasksSnapshot.map { row ->
-            if (row.id == taskId) row.copy(roadmap = newRoadmap, status = derived) else row
+            if (row.id == taskId) {
+                row.copy(roadmap = newRoadmap, status = derived, completedAt = taskCompletedAt)
+            } else {
+                row
+            }
         }
         bindHomeTodayPlan(homeTasksSnapshot)
         val taskJustCompleted = derived == TaskStatus.COMPLETE && previousStatus != TaskStatus.COMPLETE
-        if (taskJustCompleted) {
-            updateHomeUpcomingPreview(homeTasksSnapshot, newlyCompletedTaskId = taskId)
-        } else {
-            refreshHomeUpcomingPreview(homeTasksSnapshot)
+        val taskJustUncompleted = derived != TaskStatus.COMPLETE && previousStatus == TaskStatus.COMPLETE
+        when {
+            taskJustCompleted ->
+                updateHomeUpcomingPreview(homeTasksSnapshot, newlyCompletedTaskId = taskId)
+            taskJustUncompleted ->
+                updateHomeUpcomingPreview(homeTasksSnapshot, newlyUncompletedTaskId = taskId)
+            else -> refreshHomeUpcomingPreview(homeTasksSnapshot)
         }
 
         // Achievement: "First task completed" — repurposed to step-based:
@@ -1493,7 +1511,11 @@ class HomeActivity : AppCompatActivity() {
                                 homeRoadmapPatchInFlight = false
                                 if (isFinishing) return@runOnUiThread
                                 homeTasksSnapshot = homeTasksSnapshot.map { row ->
-                                    if (row.id == taskId) row.copy(status = st.status) else row
+                                    if (row.id == taskId) {
+                                        row.copy(status = st.status, completedAt = st.completedAt)
+                                    } else {
+                                        row
+                                    }
                                 }
                                 bindHomeTodayPlan(homeTasksSnapshot)
                                 refreshHomeUpcomingPreview(homeTasksSnapshot)
@@ -1552,10 +1574,12 @@ class HomeActivity : AppCompatActivity() {
     /**
      * Keeps Coming up slots stable while steps progress. When [newlyCompletedTaskId] is set, removes
      * that task and optionally fills the slot with the next due-date future task not already shown.
+     * When [newlyUncompletedTaskId] is set, adds that task back if eligible and re-ranks to the top 3.
      */
     private fun updateHomeUpcomingPreview(
         allTasks: List<SupabaseTasksApi.TaskRow>,
-        newlyCompletedTaskId: String?,
+        newlyCompletedTaskId: String? = null,
+        newlyUncompletedTaskId: String? = null,
     ) {
         val today = LocalDate.now()
         if (homeUpcomingDisplayedIds.isEmpty()) {
@@ -1576,6 +1600,18 @@ class HomeActivity : AppCompatActivity() {
                 .firstOrNull { it.id !in displayedSet && isFutureUpcomingTask(it, today) }
             if (replacement != null) {
                 ids = ids + replacement.id
+            }
+        }
+
+        if (newlyUncompletedTaskId != null) {
+            val task = allTasks.find { it.id == newlyUncompletedTaskId }
+            if (task != null && isUpcomingEligible(task) && newlyUncompletedTaskId !in ids) {
+                ids = (ids + newlyUncompletedTaskId)
+                    .mapNotNull { id -> allTasks.find { it.id == id } }
+                    .filter { isUpcomingEligible(it) }
+                    .sortedWith(compareBy(nullsLast()) { it.dueDate })
+                    .take(3)
+                    .map { it.id }
             }
         }
 
@@ -1683,15 +1719,18 @@ class HomeActivity : AppCompatActivity() {
         }
         val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
         val pinKey = "${task.id}:simple"
-        val today = LocalDate.now()
         val due = TodayPlanWork.simpleTaskDueLocalDate(task)
-        val inTodayPlanScope = due != null && !due.isAfter(today)
-        if (checked && inTodayPlanScope) {
-            homeSimpleCompletedTodayIds.add(task.id)
-            homeTodayPlanPinnedCheckedKeys.add(pinKey)
-        } else if (!checked) {
-            homeSimpleCompletedTodayIds.remove(task.id)
+        val today = LocalDate.now()
+        val isFutureDue = due != null && due.isAfter(today)
+        if (checked) {
+            if (isFutureDue) {
+                homeGetAheadPinnedCheckedKeys.add(pinKey)
+            } else if (due != null && !due.isAfter(today)) {
+                homeTodayPlanPinnedCheckedKeys.add(pinKey)
+            }
+        } else {
             homeTodayPlanPinnedCheckedKeys.remove(pinKey)
+            homeGetAheadPinnedCheckedKeys.remove(pinKey)
         }
         networkExecutor.execute {
             when (val result = SupabaseTasksApi.updateTaskStatus(token, task.id, targetStatus)) {
@@ -1702,11 +1741,12 @@ class HomeActivity : AppCompatActivity() {
                 }
                 is SupabaseTasksApi.PatchResult.Failure -> runOnUiThread {
                     if (isFinishing) return@runOnUiThread
-                    if (checked && inTodayPlanScope) {
-                        homeSimpleCompletedTodayIds.remove(task.id)
+                    if (checked) {
                         homeTodayPlanPinnedCheckedKeys.remove(pinKey)
-                    } else if (!checked) {
-                        homeSimpleCompletedTodayIds.add(task.id)
+                        homeGetAheadPinnedCheckedKeys.remove(pinKey)
+                    } else if (isFutureDue) {
+                        homeGetAheadPinnedCheckedKeys.add(pinKey)
+                    } else if (due != null && !due.isAfter(today)) {
                         homeTodayPlanPinnedCheckedKeys.add(pinKey)
                     }
                     tasksAdapter.notifyDataSetChanged()
