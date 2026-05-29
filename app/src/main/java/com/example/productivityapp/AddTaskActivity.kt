@@ -78,6 +78,9 @@ class AddTaskActivity : AppCompatActivity() {
         val additionalDetailsInput = findViewById<com.google.android.material.textfield.TextInputEditText>(
             R.id.addTaskAiAdditionalDetailsInput
         )
+        val estimatedHoursInput = findViewById<com.google.android.material.textfield.TextInputEditText>(
+            R.id.addTaskEstimatedHoursInput
+        )
 
         val pickDocumentLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@registerForActivityResult
@@ -265,6 +268,7 @@ class AddTaskActivity : AppCompatActivity() {
             val assignmentType = selectedAssignmentType
             val difficulty = selectedDifficulty
             val requirements = additionalDetailsInput.text?.toString()?.trim()?.takeIf { it.isNotBlank() }
+            val userEstimatedHours = readUserEstimatedHours(estimatedHoursInput)
             val selectedDoc = selectedDocUri
             val selectedPhoto = selectedPhotoUri
             val creatingComplex = isComplexMode
@@ -348,6 +352,8 @@ class AddTaskActivity : AppCompatActivity() {
                             }
                         }
 
+                        val courseContext = resolveCourseContextForRoadmap(accessToken, selectedCourseId)
+
                         val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
                             title = title,
@@ -357,6 +363,10 @@ class AddTaskActivity : AppCompatActivity() {
                             requirements = requirements,
                             documentContent = documentContent,
                             photoText = photoText,
+                            courseName = courseContext.first,
+                            courseLevel = courseContext.second,
+                            courseSyllabus = courseContext.third,
+                            userEstimatedHours = userEstimatedHours,
                         )) {
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {
@@ -428,6 +438,32 @@ class AddTaskActivity : AppCompatActivity() {
                     CourseSelectorHelper.bind(this, courseDropdown, courseOptions, selectedCourseId = null)
                 }
                 is SupabaseCoursesApi.ListResult.Failure -> Unit
+            }
+        }
+    }
+
+    private fun readUserEstimatedHours(
+        input: com.google.android.material.textfield.TextInputEditText,
+    ): Double? {
+        val text = input.text?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return null
+        return text.toDoubleOrNull()
+    }
+
+    private fun resolveCourseContextForRoadmap(
+        accessToken: String,
+        courseId: String?,
+    ): Triple<String?, String?, String?> {
+        if (courseId.isNullOrBlank()) return Triple(null, null, null)
+        return when (val result = SupabaseCoursesApi.getCourse(accessToken, courseId)) {
+            is SupabaseCoursesApi.GetResult.Success -> Triple(
+                result.course.name,
+                result.course.level,
+                result.course.syllabus,
+            )
+            is SupabaseCoursesApi.GetResult.Failure -> {
+                Log.w(logTag, "Could not load course for roadmap.\n${result.message}")
+                Triple(null, null, null)
             }
         }
     }

@@ -27,6 +27,10 @@ object SupabaseEdgeFunctionsApi {
         requirements: String?,
         documentContent: String?,
         photoText: String?,
+        courseName: String? = null,
+        courseLevel: String? = null,
+        courseSyllabus: String? = null,
+        userEstimatedHours: Double? = null,
     ): RoadmapResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return RoadmapResult.Failure("Missing Supabase config.")
@@ -39,6 +43,14 @@ object SupabaseEdgeFunctionsApi {
             .put("requirements", requirements ?: JSONObject.NULL)
             .put("documentContent", documentContent ?: JSONObject.NULL)
             .put("photoText", photoText ?: JSONObject.NULL)
+            .put("courseName", courseName ?: JSONObject.NULL)
+            .put("courseLevel", courseLevel ?: JSONObject.NULL)
+            .put("courseSyllabus", courseSyllabus ?: JSONObject.NULL)
+        if (userEstimatedHours != null) {
+            payload.put("userEstimatedHours", userEstimatedHours)
+        } else {
+            payload.put("userEstimatedHours", JSONObject.NULL)
+        }
 
         val base = BuildConfig.SUPABASE_URL.trimEnd('/')
         val primary = callRoadmapFunction(base, PRIMARY_ROADMAP_FUNCTION_SLUG, accessToken, payload)

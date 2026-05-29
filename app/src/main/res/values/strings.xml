@@ -170,6 +170,8 @@
     <string name="add_task_ai_questions_difficulty_hard">Hard</string>
     <string name="add_task_ai_questions_additional_details_label">Additional details</string>
     <string name="add_task_ai_questions_additional_details_hint">Anything important (requirements, length, topics, constraints)…</string>
+    <string name="add_task_estimated_hours_label">How long do you think this will take? (optional)</string>
+    <string name="add_task_estimated_hours_hint">Estimated hours</string>
 
     <string name="my_courses_label">My Courses</string>
     <string name="my_courses_empty">No courses yet. Tap Add to create one.</string>

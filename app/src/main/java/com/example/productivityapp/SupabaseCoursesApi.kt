@@ -36,6 +36,48 @@ object SupabaseCoursesApi {
         data class Failure(val message: String) : DeleteResult()
     }
 
+    sealed class GetResult {
+        data class Success(val course: CourseRow) : GetResult()
+        data class Failure(val message: String) : GetResult()
+    }
+
+    fun getCourse(accessToken: String, courseId: String): GetResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return GetResult.Failure("Missing Supabase config.")
+        }
+        val id = courseId.trim()
+        if (id.isEmpty()) return GetResult.Failure("Missing course id.")
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
+            val query = "select=id,name,level,syllabus&id=eq.$enc"
+            val url = URL("$base/rest/v1/courses?$query")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode !in 200..299) {
+                return GetResult.Failure(parseError(responseBody, responseCode))
+            }
+            val arr = JSONArray(responseBody)
+            if (arr.length() == 0) return GetResult.Failure("Course not found.")
+            parseCourseRow(arr.getJSONObject(0))?.let { GetResult.Success(it) }
+                ?: GetResult.Failure("Course missing id.")
+        } catch (e: Exception) {
+            GetResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
     fun listCourses(accessToken: String, userId: String): ListResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return ListResult.Failure("Missing Supabase config.")
