@@ -302,7 +302,6 @@ class HomeActivity : AppCompatActivity() {
                 achievementsUserId = SupabaseUserId.resolveUserId(token)
                 achievementsUserId?.let { AchievementManager.ensureLoaded(token, it) }
             }
-            maybeShowStreakOnAppLaunch(token)
             // Keep home cards and task list aligned with Supabase (e.g. after status edit on detail).
             when (currentTab) {
                 Tab.Home -> loadTasks(showLoading = false)
@@ -767,9 +766,8 @@ class HomeActivity : AppCompatActivity() {
         }
 
     /**
-     * Ordered future-day review buckets (excluding today's bucket): include days where at least one
-     * step is completed so "started early" work stays visible; exclude the focused Get ahead day
-     * while that section is visible to avoid duplicate presentation.
+     * Ordered review buckets: today only after the full day plan is complete; future days when at
+     * least one step is completed (excluding the focused Get ahead day while that section is visible).
      */
     private fun buildCompletedReviewDays(
         todayEntries: List<TodayPlanEntry>,
@@ -777,9 +775,10 @@ class HomeActivity : AppCompatActivity() {
         today: LocalDate,
         getAheadVisible: Boolean,
         focusDay: LocalDate?,
+        includeTodayReview: Boolean,
     ): List<Pair<LocalDate, List<TodayPlanEntry>>> {
         val out = ArrayList<Pair<LocalDate, List<TodayPlanEntry>>>()
-        if (todayEntries.isNotEmpty()) {
+        if (includeTodayReview && todayEntries.isNotEmpty()) {
             out.add(today to sortTodayPlanEntries(todayEntries, today))
         }
         futureEntries.groupBy { it.recommendedOn }.toSortedMap().forEach { (day, list) ->
@@ -805,7 +804,6 @@ class HomeActivity : AppCompatActivity() {
         today: LocalDate,
         getAheadVisible: Boolean,
         focusDay: LocalDate?,
-        hasRemainingPlanWork: Boolean = false,
     ) {
         homeTodayPlanCompletedTodayHost.removeAllViews()
         homeTodayPlanFutureReviewBeforeFocusHost.removeAllViews()
@@ -854,11 +852,7 @@ class HomeActivity : AppCompatActivity() {
             }
             val allDoneOnDay = list.all { it.isCompleted }
             val partiallyDoneFutureDay = day.isAfter(today) && !allDoneOnDay
-            val compactTodayReview = day == today && hasRemainingPlanWork
-            if (compactTodayReview) {
-                title.visibility = View.GONE
-                progressBlock.visibility = View.GONE
-            } else if (day.isAfter(today) || day == today) {
+            if (day.isAfter(today) || day == today) {
                 title.visibility = View.VISIBLE
                 progressBlock.visibility = View.VISIBLE
                 bindPlanProgress(
@@ -878,7 +872,6 @@ class HomeActivity : AppCompatActivity() {
             }
             when {
                 partiallyDoneFutureDay -> allDoneBanner.visibility = View.GONE
-                compactTodayReview -> allDoneBanner.visibility = View.GONE
                 day == today && list.isNotEmpty() -> {
                     allDoneBanner.visibility = View.VISIBLE
                     allDoneBanner.text = getString(R.string.home_today_plan_all_done_banner_today)
@@ -902,7 +895,6 @@ class HomeActivity : AppCompatActivity() {
                 toggle.visibility = View.VISIBLE
                 toggle.text = when {
                     expanded -> getString(R.string.home_today_plan_show_less)
-                    compactTodayReview -> getString(R.string.home_today_plan_view_completed_count, list.size)
                     day.isAfter(today) && allDoneOnDay -> getString(R.string.home_today_plan_view_completed_ahead)
                     else -> getString(R.string.home_today_plan_view_completed)
                 }
@@ -1610,6 +1602,7 @@ class HomeActivity : AppCompatActivity() {
         val workEntries = todayPlanWorkEntries(allActiveTasks, today)
         val progressEntries = todayPlanProgressEntries(allActiveTasks, today)
         val hasIncomplete = workEntries.any { !it.isCompleted }
+        val todayPlanComplete = isTodayWorkPlanComplete(allActiveTasks, today)
         val reviewTodayEntries = todayPlanCompletedReviewEntries(allActiveTasks, today)
         val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
         val hasStartedFutureWork = futureEntries.any { it.isCompleted }
@@ -1668,6 +1661,7 @@ class HomeActivity : AppCompatActivity() {
             today,
             getAheadVisible,
             homeGetAheadFocusDate,
+            includeTodayReview = todayPlanComplete,
         )
         pruneCompletedReviewExpandedDays(reviewDays.map { it.first }.toSet())
         bindCompletedReviewByDay(
@@ -1675,7 +1669,6 @@ class HomeActivity : AppCompatActivity() {
             today = today,
             getAheadVisible = getAheadVisible,
             focusDay = homeGetAheadFocusDate,
-            hasRemainingPlanWork = hasIncomplete,
         )
 
         val hasAnythingVisible = hasIncomplete || reviewDays.isNotEmpty() || getAheadVisible
@@ -1712,7 +1705,6 @@ class HomeActivity : AppCompatActivity() {
         val isFutureDue = due != null && due.isAfter(today)
         val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
         val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
-        val userIdForProfileWrites = userIdForAchievements
         val beforeSnapshot = homeTasksSnapshot
         val beforeTodayHalf = todayHalfwayRatio(beforeSnapshot, today)
         val workPlanCompleteBefore = isTodayWorkPlanComplete(beforeSnapshot, today)
@@ -1758,26 +1750,7 @@ class HomeActivity : AppCompatActivity() {
         val workPlanCompleteAfter = isTodayWorkPlanComplete(homeTasksSnapshot, today)
         if (checked && !planCompleteFired && !workPlanCompleteBefore && workPlanCompleteAfter) {
             planCompleteFired = true
-            if (userIdForProfileWrites != null) {
-                val uid = userIdForProfileWrites
-                networkExecutor.execute {
-                    val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, today)
-                    runOnUiThread {
-                        if (!isFinishing) {
-                            AchievementManager.showPlanComplete(this@HomeActivity, today, streak)
-                        }
-                    }
-                }
-            } else {
-                AchievementManager.showPlanComplete(this, today, 1)
-            }
-        } else if (!checked && workPlanCompleteBefore && !workPlanCompleteAfter) {
-            if (userIdForProfileWrites != null) {
-                val uid = userIdForProfileWrites
-                networkExecutor.execute {
-                    StreakCoordinator.undoTodayCompletionIfPossible(token, uid)
-                }
-            }
+            AchievementManager.showPlanComplete(this, today)
         }
 
         if (checked && userIdForAchievements != null && !planCompleteFired) {
@@ -1829,8 +1802,6 @@ class HomeActivity : AppCompatActivity() {
         if (stepIndex < 0) return
         val token = SessionManager.getAccessToken(this) ?: return
         val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
-        // Use the resolved user id for profile writes even if achievements are disabled/unavailable.
-        val userIdForProfileWrites = userIdForAchievements
         val task = homeTasksSnapshot.find { it.id == taskId } ?: return
         val beforeSnapshot = homeTasksSnapshot
         val steps = RoadmapStep.parseList(task.roadmap).toMutableList()
@@ -1937,7 +1908,7 @@ class HomeActivity : AppCompatActivity() {
             AchievementManager.maybeShowGettingAhead(this, token, userIdForAchievements)
         }
 
-        // Achievement: clearing overdue backlog — celebrate catch-up, not a daily streak.
+        // Achievement: clearing overdue backlog — celebrate catch-up.
         var planCompleteFired = false
         val overdueClearedNow = checked && hadOverdueBefore &&
             !TodayPlanWork.hasIncompleteOverdueSteps(homeTasksSnapshot, today)
@@ -1946,30 +1917,11 @@ class HomeActivity : AppCompatActivity() {
             AchievementManager.showAllCaughtUp(this)
         }
 
-        // Achievement: "Plan complete" + streak when today's scheduled work is finished (not overdue catch-up).
+        // Achievement: "Plan complete" when today's scheduled work is finished (not overdue catch-up).
         val workPlanCompleteAfter = isTodayWorkPlanComplete(homeTasksSnapshot, today)
         if (!planCompleteFired && !workPlanCompleteBefore && workPlanCompleteAfter) {
             planCompleteFired = true
-            if (userIdForProfileWrites != null) {
-                val uid = userIdForProfileWrites
-                networkExecutor.execute {
-                    val streak = StreakCoordinator.resolveStreakForPlanComplete(token, uid, today)
-                    runOnUiThread {
-                        if (!isFinishing) {
-                            AchievementManager.showPlanComplete(this@HomeActivity, today, streak)
-                        }
-                    }
-                }
-            } else {
-                AchievementManager.showPlanComplete(this, today, 1)
-            }
-        } else if (workPlanCompleteBefore && !workPlanCompleteAfter) {
-            if (userIdForProfileWrites != null) {
-                val uid = userIdForProfileWrites
-                networkExecutor.execute {
-                    StreakCoordinator.undoTodayCompletionIfPossible(token, uid)
-                }
-            }
+            AchievementManager.showPlanComplete(this, today)
         }
 
         // Achievement: "Halfway There!" — based on TODAY's plan work (hours-first).
@@ -2308,34 +2260,6 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun maybeShowStreakOnAppLaunch(token: String) {
-        synchronized(streakLaunchLock) {
-            if (streakLaunchPopupShownThisProcess) return
-        }
-        networkExecutor.execute {
-            val uid = achievementsUserId ?: SupabaseUserId.resolveUserId(token) ?: return@execute
-            when (val r = SupabaseProfilesApi.get(token, uid)) {
-                is SupabaseProfilesApi.GetResult.Success -> {
-                    if (r.row.currentStreak < 2) return@execute
-                    runOnUiThread {
-                        if (isFinishing) return@runOnUiThread
-                        synchronized(streakLaunchLock) {
-                            if (streakLaunchPopupShownThisProcess) return@runOnUiThread
-                            streakLaunchPopupShownThisProcess = true
-                        }
-                        AchievementPopup.show(
-                            activity = this,
-                            emoji = "🔥",
-                            title = "Hey!",
-                            message = "You're on a 🔥 ${r.row.currentStreak} day streak! Keep it up!",
-                        )
-                    }
-                }
-                else -> Unit
-            }
-        }
-    }
-
     private fun loadTasks(showLoading: Boolean = true) {
         val token = SessionManager.getAccessToken(this)
         if (token.isNullOrBlank()) {
@@ -2399,9 +2323,6 @@ class HomeActivity : AppCompatActivity() {
     }
 
     companion object {
-        private val streakLaunchLock = Any()
-        private var streakLaunchPopupShownThisProcess = false
-
         const val EXTRA_SELECTED_TAB = "selected_tab"
         const val TAB_HOME = "home"
         const val TAB_TASKS = "tasks"
