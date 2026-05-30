@@ -48,6 +48,65 @@
                     android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
                     tools:text="Good morning, Alex 👋" />
 
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/homeOverdueRecoveryCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:visibility="gone"
+                    app:cardCornerRadius="20dp"
+                    app:cardElevation="3dp"
+                    app:strokeColor="?attr/colorOutlineVariant"
+                    app:strokeWidth="1dp"
+                    tools:visibility="visible">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="20dp">
+
+                        <TextView
+                            android:id="@+id/homeOverdueRecoveryTitle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/home_overdue_recovery_title"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+
+                        <TextView
+                            android:id="@+id/homeOverdueRecoverySubtitle"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            tools:text="You have 2 unfinished steps from Essay Draft. Want to update your plan?" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/homeOverdueRecoveryAddToToday"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp"
+                            android:text="@string/home_overdue_recovery_add_to_today" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/homeOverdueRecoverySpreadOut"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/home_overdue_recovery_spread_out" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/homeOverdueRecoveryKeepAsIs"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="@string/home_overdue_recovery_keep_as_is" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
                 <LinearLayout
                     android:id="@+id/homeTodayPlanSection"
                     android:layout_width="match_parent"
@@ -442,6 +501,50 @@
                         android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                         android:textColor="?attr/colorOnSurfaceVariant"
                         tools:text="alex@example.com" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/profile_account_section"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/profileSchoolInputLayout"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/school_label">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/profileSchoolInput"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textCapWords" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/profileYearInSchoolInputLayout"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:hint="@string/year_in_school_label">
+
+                        <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                            android:id="@+id/profileYearInSchoolDropdown"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/profileSaveAccountButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/profile_save_account" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

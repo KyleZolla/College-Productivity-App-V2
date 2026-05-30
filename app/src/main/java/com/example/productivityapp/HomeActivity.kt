@@ -25,6 +25,9 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
+import com.google.android.material.textfield.TextInputEditText
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -82,6 +85,11 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var homeDateLine: TextView
     private lateinit var homeGreetingLine: TextView
+    private lateinit var homeOverdueRecoveryCard: MaterialCardView
+    private lateinit var homeOverdueRecoverySubtitle: TextView
+    private lateinit var homeOverdueRecoveryAddToToday: MaterialButton
+    private lateinit var homeOverdueRecoverySpreadOut: MaterialButton
+    private lateinit var homeOverdueRecoveryKeepAsIs: MaterialButton
     private lateinit var homeTodayPlanSection: LinearLayout
     private lateinit var homeTodayPlanProgressBlock: LinearLayout
     private lateinit var homeTodayPlanStepsSummary: TextView
@@ -120,20 +128,35 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var profileDisplayName: TextView
     private lateinit var profileEmail: TextView
+    private lateinit var profileSchoolInput: TextInputEditText
+    private lateinit var profileYearInSchoolDropdown: MaterialAutoCompleteTextView
+    private lateinit var profileSaveAccountButton: MaterialButton
     private lateinit var profileCoursesLoading: ProgressBar
     private lateinit var profileCoursesEmpty: TextView
     private lateinit var profileCoursesList: LinearLayout
     private var courseDeleteInFlight = false
+    private var profileAccountSaveInFlight = false
+
+    private lateinit var homeRoot: View
+    /** taskId:stepIndex -> original recommendedDate before a recovery reschedule. */
+    private var overdueRecoveryUndoSnapshot: Map<String, String>? = null
+    private var overdueRecoveryUndoWasDismissOnly = false
+    private var overdueRecoveryKeepAsIsPending = false
+    private var overdueRecoveryUndoMessageRes: Int? = null
+    private var overdueRecoveryUndoSnackbar: Snackbar? = null
+    /** When false, programmatic snackbar dismiss must not clear undo state. */
+    private var overdueRecoverySnackbarDismissShouldFinalize = true
+    private var overdueRecoveryOperationGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_home)
 
-        val root = findViewById<View>(R.id.homeRoot)
+        homeRoot = findViewById(R.id.homeRoot)
         val bottomBar = findViewById<LinearLayout>(R.id.bottomNavBar)
 
-        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(homeRoot) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(bars.left, bars.top, bars.right, 0)
             insets
@@ -166,6 +189,18 @@ class HomeActivity : AppCompatActivity() {
 
         homeDateLine = findViewById(R.id.homeDateLine)
         homeGreetingLine = findViewById(R.id.homeGreetingLine)
+        homeOverdueRecoveryCard = findViewById(R.id.homeOverdueRecoveryCard)
+        homeOverdueRecoverySubtitle = findViewById(R.id.homeOverdueRecoverySubtitle)
+        homeOverdueRecoveryAddToToday = findViewById(R.id.homeOverdueRecoveryAddToToday)
+        homeOverdueRecoverySpreadOut = findViewById(R.id.homeOverdueRecoverySpreadOut)
+        homeOverdueRecoveryKeepAsIs = findViewById(R.id.homeOverdueRecoveryKeepAsIs)
+        homeOverdueRecoveryAddToToday.setOnClickListener {
+            applyOverdueRecoveryReschedule(OverdueStepRecovery.RescheduleMode.ADD_TO_TODAY)
+        }
+        homeOverdueRecoverySpreadOut.setOnClickListener {
+            applyOverdueRecoveryReschedule(OverdueStepRecovery.RescheduleMode.SPREAD_OUT)
+        }
+        homeOverdueRecoveryKeepAsIs.setOnClickListener { dismissOverdueRecoveryCard() }
         homeTodayPlanSection = findViewById(R.id.homeTodayPlanSection)
         homeTodayPlanProgressBlock = findViewById(R.id.homeTodayPlanProgressBlock)
         homeTodayPlanStepsSummary = findViewById(R.id.homeTodayPlanStepsSummary)
@@ -197,12 +232,20 @@ class HomeActivity : AppCompatActivity() {
 
         profileDisplayName = findViewById(R.id.profileDisplayName)
         profileEmail = findViewById(R.id.profileEmail)
+        profileSchoolInput = findViewById(R.id.profileSchoolInput)
+        profileYearInSchoolDropdown = findViewById(R.id.profileYearInSchoolDropdown)
+        profileSaveAccountButton = findViewById(R.id.profileSaveAccountButton)
+        YearInSchoolHelper.bind(this, profileYearInSchoolDropdown, selected = null)
         profileCoursesLoading = findViewById(R.id.profileCoursesLoading)
         profileCoursesEmpty = findViewById(R.id.profileCoursesEmpty)
         profileCoursesList = findViewById(R.id.profileCoursesList)
 
         findViewById<MaterialButton>(R.id.addCourseButton).setOnClickListener {
             addCourseLauncher.launch(Intent(this, AddCourseActivity::class.java))
+        }
+
+        profileSaveAccountButton.setOnClickListener {
+            saveProfileAccountFields()
         }
 
         findViewById<MaterialButton>(R.id.logOutButton).setOnClickListener {
@@ -248,6 +291,7 @@ class HomeActivity : AppCompatActivity() {
             }
             Tab.Profile -> {
                 refreshProfileCard()
+                loadProfileAccountFields()
                 loadMyCourses(showLoading = true)
             }
         }
@@ -306,6 +350,7 @@ class HomeActivity : AppCompatActivity() {
             }
             Tab.Profile -> {
                 refreshProfileCard()
+                loadProfileAccountFields()
                 loadMyCourses(showLoading = true)
             }
         }
@@ -329,6 +374,9 @@ class HomeActivity : AppCompatActivity() {
         if (token.isNullOrBlank()) {
             profileDisplayName.text = getString(R.string.profile_name_fallback)
             profileEmail.text = ""
+            profileSchoolInput.setText("")
+            YearInSchoolHelper.bind(this, profileYearInSchoolDropdown, selected = null)
+            profileSaveAccountButton.isEnabled = false
             profileCoursesList.removeAllViews()
             profileCoursesEmpty.text = getString(R.string.error_task_not_signed_in)
             profileCoursesEmpty.visibility = View.VISIBLE
@@ -338,6 +386,79 @@ class HomeActivity : AppCompatActivity() {
         val name = AuthUserDisplayName.displayNameForProfile(token)
         profileDisplayName.text = name.ifBlank { getString(R.string.profile_name_fallback) }
         profileEmail.text = AuthUserDisplayName.emailFromAccessToken(token)
+    }
+
+    private fun loadProfileAccountFields() {
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            profileSchoolInput.setText("")
+            YearInSchoolHelper.bind(this, profileYearInSchoolDropdown, selected = null)
+            profileSaveAccountButton.isEnabled = false
+            return
+        }
+        profileSaveAccountButton.isEnabled = true
+        val userId = SupabaseUserId.resolveUserId(token)
+        if (userId.isNullOrBlank()) return
+
+        networkExecutor.execute {
+            when (val result = SupabaseProfilesApi.get(token, userId)) {
+                is SupabaseProfilesApi.GetResult.Success -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    profileSchoolInput.setText(result.row.school.orEmpty())
+                    YearInSchoolHelper.bind(this, profileYearInSchoolDropdown, result.row.yearInSchool)
+                }
+                is SupabaseProfilesApi.GetResult.NotFound -> runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    profileSchoolInput.setText("")
+                    YearInSchoolHelper.bind(this, profileYearInSchoolDropdown, selected = null)
+                }
+                is SupabaseProfilesApi.GetResult.Failure -> Unit
+            }
+        }
+    }
+
+    private fun saveProfileAccountFields() {
+        if (profileAccountSaveInFlight) return
+        val token = SessionManager.getAccessToken(this)
+        if (token.isNullOrBlank()) {
+            Toast.makeText(this, R.string.error_task_not_signed_in, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val userId = SupabaseUserId.resolveUserId(token)
+        if (userId.isNullOrBlank()) {
+            Toast.makeText(this, R.string.error_task_user_unknown, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val school = profileSchoolInput.text?.toString()?.trim().orEmpty().ifBlank { null }
+        val yearInSchool = YearInSchoolHelper.selectedValue(profileYearInSchoolDropdown)
+
+        profileAccountSaveInFlight = true
+        profileSaveAccountButton.isEnabled = false
+        profileSaveAccountButton.text = getString(R.string.profile_account_saving)
+
+        networkExecutor.execute {
+            when (val result = SupabaseProfilesApi.upsertAccountFields(token, userId, school, yearInSchool)) {
+                is SupabaseProfilesApi.PatchResult.Success -> runOnUiThread {
+                    profileAccountSaveInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    profileSaveAccountButton.isEnabled = true
+                    profileSaveAccountButton.text = getString(R.string.profile_save_account)
+                    Toast.makeText(this, R.string.profile_account_saved, Toast.LENGTH_SHORT).show()
+                }
+                is SupabaseProfilesApi.PatchResult.Failure -> runOnUiThread {
+                    profileAccountSaveInFlight = false
+                    if (isFinishing) return@runOnUiThread
+                    profileSaveAccountButton.isEnabled = true
+                    profileSaveAccountButton.text = getString(R.string.profile_save_account)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.profile_account_save_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
     }
 
     private fun loadMyCourses(showLoading: Boolean = true) {
@@ -477,6 +598,7 @@ class HomeActivity : AppCompatActivity() {
             homeUpcomingCards.removeAllViews()
             homeUpcomingCards.visibility = View.GONE
             homeTodayPlanSection.visibility = View.GONE
+            homeOverdueRecoveryCard.visibility = View.GONE
             homeUpcomingEmpty.text = getString(R.string.error_task_not_signed_in)
             homeUpcomingEmpty.visibility = View.VISIBLE
             return
@@ -487,6 +609,7 @@ class HomeActivity : AppCompatActivity() {
             homeUpcomingEmpty.visibility = View.GONE
             homeUpcomingCards.visibility = View.GONE
             homeTodayPlanSection.visibility = View.GONE
+            homeOverdueRecoveryCard.visibility = View.GONE
         }
 
         networkExecutor.execute {
@@ -1098,6 +1221,14 @@ class HomeActivity : AppCompatActivity() {
         return getString(R.string.task_row_due_line, dueFormatted)
     }
 
+    private fun orderComplexPlanEntriesByRoadmap(entries: List<TodayPlanEntry>): List<TodayPlanEntry> {
+        if (entries.isEmpty()) return entries
+        val byTask = entries.groupBy { it.task.id }
+        return entries.map { it.task.id }.distinct().flatMap { taskId ->
+            byTask[taskId].orEmpty().sortedBy { it.stepIndex }
+        }
+    }
+
     private fun bindPlanStepRows(parent: LinearLayout, visibleEntries: List<TodayPlanEntry>) {
         parent.removeAllViews()
         val inflater = LayoutInflater.from(this)
@@ -1112,7 +1243,7 @@ class HomeActivity : AppCompatActivity() {
 
         var isFirstHeader = true
         var lastComplexTaskId: String? = null
-        for (entry in visibleEntries.filter { !it.isSimple }) {
+        for (entry in orderComplexPlanEntriesByRoadmap(visibleEntries.filter { !it.isSimple })) {
             if (entry.task.id != lastComplexTaskId) {
                 val header = inflater.inflate(R.layout.item_home_today_plan_task_header, parent, false)
                 val top = if (isFirstHeader) headerTopFirst else headerTopRest
@@ -1210,10 +1341,271 @@ class HomeActivity : AppCompatActivity() {
         parent.addView(row)
     }
 
+    private fun bindOverdueRecoveryCard(allActiveTasks: List<SupabaseTasksApi.TaskRow>, today: LocalDate) {
+        if (overdueRecoveryKeepAsIsPending) {
+            homeOverdueRecoveryCard.visibility = View.GONE
+            return
+        }
+        if (OverdueRecoveryDismissal.isDismissedForToday(this, today)) {
+            homeOverdueRecoveryCard.visibility = View.GONE
+            return
+        }
+        val summary = OverdueStepRecovery.collectSummary(allActiveTasks, today)
+        if (summary.stepCount == 0) {
+            homeOverdueRecoveryCard.visibility = View.GONE
+            return
+        }
+        homeOverdueRecoverySubtitle.text = when {
+            summary.taskCount == 1 && summary.singleTaskTitle != null ->
+                getString(
+                    R.string.home_overdue_recovery_subtitle_single_task,
+                    summary.stepCount,
+                    summary.singleTaskTitle,
+                )
+            summary.taskCount > 1 ->
+                getString(
+                    R.string.home_overdue_recovery_subtitle_multi_task,
+                    summary.stepCount,
+                    summary.taskCount,
+                )
+            else ->
+                getString(R.string.home_overdue_recovery_subtitle_generic, summary.stepCount)
+        }
+        val actionsEnabled = !homeRoadmapPatchInFlight
+        homeOverdueRecoveryAddToToday.isEnabled = actionsEnabled
+        homeOverdueRecoverySpreadOut.isEnabled = actionsEnabled
+        homeOverdueRecoveryKeepAsIs.isEnabled = actionsEnabled
+        homeOverdueRecoveryCard.visibility = View.VISIBLE
+    }
+
+    private fun dismissOverdueRecoveryCard() {
+        overdueRecoveryKeepAsIsPending = true
+        homeOverdueRecoveryCard.visibility = View.GONE
+        overdueRecoveryUndoSnapshot = null
+        overdueRecoveryUndoWasDismissOnly = true
+        showOverdueRecoveryUndoSnackbar(R.string.home_overdue_recovery_kept_as_is)
+    }
+
+    private fun captureOverdueRecoveryOriginalDates(): Map<String, String> {
+        val today = LocalDate.now()
+        val summary = OverdueStepRecovery.collectSummary(homeTasksSnapshot, today)
+        val originalDates = LinkedHashMap<String, String>()
+        for (ref in summary.steps) {
+            val task = homeTasksSnapshot.find { it.id == ref.taskId } ?: continue
+            val steps = RoadmapStep.parseList(task.roadmap)
+            if (ref.stepIndex !in steps.indices) continue
+            originalDates[overdueRecoveryStepKey(ref.taskId, ref.stepIndex)] =
+                steps[ref.stepIndex].recommendedDate
+        }
+        return originalDates
+    }
+
+    private fun overdueRecoveryStepKey(taskId: String, stepIndex: Int): String = "$taskId|$stepIndex"
+
+    private fun parseOverdueRecoveryStepKey(key: String): Pair<String, Int>? {
+        val separator = key.lastIndexOf('|')
+        if (separator <= 0 || separator == key.lastIndex) return null
+        val taskId = key.substring(0, separator)
+        val stepIndex = key.substring(separator + 1).toIntOrNull() ?: return null
+        return taskId to stepIndex
+    }
+
+    private fun buildOverdueRecoveryRestoreUpdates(
+        originalDates: Map<String, String>,
+    ): List<OverdueStepRecovery.TaskRoadmapUpdate> {
+        val updates = ArrayList<OverdueStepRecovery.TaskRoadmapUpdate>()
+        val keysByTask = originalDates.keys.groupBy { key ->
+            parseOverdueRecoveryStepKey(key)?.first ?: key.substringBeforeLast('|')
+        }
+        for ((taskId, keys) in keysByTask) {
+            val task = homeTasksSnapshot.find { it.id == taskId } ?: continue
+            val steps = RoadmapStep.parseList(task.roadmap).toMutableList()
+            for (key in keys) {
+                val (parsedTaskId, stepIndex) = parseOverdueRecoveryStepKey(key) ?: continue
+                if (parsedTaskId != taskId) continue
+                val originalDate = originalDates[key] ?: continue
+                if (stepIndex !in steps.indices) continue
+                steps[stepIndex] = steps[stepIndex].copy(recommendedDate = originalDate)
+            }
+            updates.add(
+                OverdueStepRecovery.TaskRoadmapUpdate(
+                    taskId = taskId,
+                    roadmap = RoadmapStep.toJsonArray(steps),
+                ),
+            )
+        }
+        return updates
+    }
+
+    private fun finalizeOverdueRecoveryWithoutUndo() {
+        if (overdueRecoveryUndoWasDismissOnly) {
+            OverdueRecoveryDismissal.dismissForToday(this)
+        }
+        clearOverdueRecoveryUndoState()
+    }
+
+    private fun dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded: Boolean) {
+        overdueRecoverySnackbarDismissShouldFinalize = finalizeIfNeeded
+        overdueRecoveryUndoSnackbar?.dismiss()
+        overdueRecoveryUndoSnackbar = null
+        overdueRecoverySnackbarDismissShouldFinalize = true
+    }
+
+    private fun clearOverdueRecoveryUndoState() {
+        overdueRecoveryUndoSnapshot = null
+        overdueRecoveryUndoWasDismissOnly = false
+        overdueRecoveryKeepAsIsPending = false
+        overdueRecoveryUndoMessageRes = null
+    }
+
+    private fun hasPendingOverdueRecoveryUndo(): Boolean =
+        overdueRecoveryKeepAsIsPending || overdueRecoveryUndoSnapshot != null
+
+    private fun maybeReshowOverdueRecoveryUndoSnackbar() {
+        val messageRes = overdueRecoveryUndoMessageRes ?: return
+        if (!hasPendingOverdueRecoveryUndo()) return
+        if (overdueRecoveryUndoSnackbar?.isShown == true) return
+        showOverdueRecoveryUndoSnackbar(messageRes, trackPending = false)
+    }
+
+    private fun showOverdueRecoveryUndoSnackbar(messageRes: Int, trackPending: Boolean = true) {
+        if (trackPending) {
+            overdueRecoveryUndoMessageRes = messageRes
+        }
+        dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = false)
+        val snackbar = Snackbar.make(homeRoot, getString(messageRes), Snackbar.LENGTH_INDEFINITE)
+            .setAction(R.string.undo) { undoOverdueRecoveryAction() }
+            .setAnchorView(findViewById(R.id.bottomNavBar))
+            .addCallback(object : Snackbar.Callback() {
+                override fun onDismissed(transientBottomBar: Snackbar, event: Int) {
+                    if (event == DISMISS_EVENT_ACTION) return
+                    if (!overdueRecoverySnackbarDismissShouldFinalize) return
+                    finalizeOverdueRecoveryWithoutUndo()
+                }
+            })
+        overdueRecoveryUndoSnackbar = snackbar
+        snackbar.show()
+    }
+
+    private fun undoOverdueRecoveryAction() {
+        if (overdueRecoveryUndoWasDismissOnly) {
+            dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = false)
+            clearOverdueRecoveryUndoState()
+            bindHomeTodayPlan(homeTasksSnapshot)
+            return
+        }
+        val originalDates = overdueRecoveryUndoSnapshot ?: return
+        if (originalDates.isEmpty()) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        val updates = buildOverdueRecoveryRestoreUpdates(originalDates)
+        if (updates.isEmpty()) return
+
+        dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = false)
+
+        val opGen = ++overdueRecoveryOperationGeneration
+        homeRoadmapPatchInFlight = true
+        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates)
+        clearOverdueRecoveryUndoState()
+        bindHomeTodayPlan(homeTasksSnapshot)
+
+        networkExecutor.execute {
+            var failureMessage: String? = null
+            for (update in updates) {
+                when (
+                    val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)
+                ) {
+                    is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
+                    is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
+                        failureMessage = result.message
+                        break
+                    }
+                }
+            }
+            runOnUiThread {
+                homeRoadmapPatchInFlight = false
+                if (isFinishing || opGen != overdueRecoveryOperationGeneration) return@runOnUiThread
+                if (failureMessage != null) {
+                    Toast.makeText(
+                        this,
+                        getString(R.string.home_overdue_recovery_failed, failureMessage),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    loadHomeUpcoming(showLoading = false)
+                } else {
+                    loadHomeUpcoming(showLoading = false)
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyOverdueRecoveryReschedule(mode: OverdueStepRecovery.RescheduleMode) {
+        if (homeRoadmapPatchInFlight) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        val today = LocalDate.now()
+        val updates = OverdueStepRecovery.buildUpdates(homeTasksSnapshot, today, mode)
+        if (updates.isEmpty()) return
+
+        val undoSnapshot = captureOverdueRecoveryOriginalDates()
+        val opGen = ++overdueRecoveryOperationGeneration
+        overdueRecoveryUndoSnapshot = undoSnapshot
+        overdueRecoveryUndoWasDismissOnly = false
+
+        homeRoadmapPatchInFlight = true
+        homeOverdueRecoveryAddToToday.isEnabled = false
+        homeOverdueRecoverySpreadOut.isEnabled = false
+        homeOverdueRecoveryKeepAsIs.isEnabled = false
+
+        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates)
+        bindHomeTodayPlan(homeTasksSnapshot)
+
+        val confirmationRes = when (mode) {
+            OverdueStepRecovery.RescheduleMode.ADD_TO_TODAY -> R.string.home_overdue_recovery_added_to_today
+            OverdueStepRecovery.RescheduleMode.SPREAD_OUT -> R.string.home_overdue_recovery_spread_out_done
+        }
+        showOverdueRecoveryUndoSnackbar(confirmationRes)
+
+        networkExecutor.execute {
+            var failureMessage: String? = null
+            for (update in updates) {
+                when (
+                    val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)
+                ) {
+                    is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
+                    is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
+                        failureMessage = result.message
+                        break
+                    }
+                }
+            }
+            runOnUiThread {
+                homeRoadmapPatchInFlight = false
+                if (isFinishing || opGen != overdueRecoveryOperationGeneration) return@runOnUiThread
+                if (failureMessage != null) {
+                    dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = true)
+                    Toast.makeText(
+                        this,
+                        getString(R.string.home_overdue_recovery_failed, failureMessage),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    loadHomeUpcoming(showLoading = false)
+                } else {
+                    loadHomeUpcoming(showLoading = false)
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
+                }
+            }
+        }
+    }
+
     private fun bindHomeTodayPlan(allActiveTasks: List<SupabaseTasksApi.TaskRow>) {
         homeTasksSnapshot = allActiveTasks
         homeTodayPlanSection.visibility = View.VISIBLE
         val today = LocalDate.now()
+        bindOverdueRecoveryCard(allActiveTasks, today)
         val scopeEntries = todayPlanScopeEntries(allActiveTasks, today)
         val workEntries = todayPlanWorkEntries(allActiveTasks, today)
         val progressEntries = todayPlanProgressEntries(allActiveTasks, today)
@@ -1303,6 +1695,7 @@ class HomeActivity : AppCompatActivity() {
             homeTodayPlanCompletedByDayHost.visibility = View.GONE
             homeTodayPlanCompletedByDayHost.removeAllViews()
         }
+        maybeReshowOverdueRecoveryUndoSnackbar()
     }
 
     private fun onSimpleTodayPlanToggled(taskId: String, checked: Boolean) {

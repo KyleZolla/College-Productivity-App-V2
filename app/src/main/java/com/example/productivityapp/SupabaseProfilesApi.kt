@@ -10,7 +10,7 @@ import java.time.LocalDate
 
 /**
  * `profiles` table via PostgREST.
- * Columns (camelCase): `id`, `currentStreak`, `lastCompletedDate`.
+ * Columns (camelCase): `id`, `currentStreak`, `lastCompletedDate`, `school`, `yearInSchool`.
  * Future-day plan done early: only `lastCompletedDate` is set to that plan day; `currentStreak` is unchanged.
  */
 object SupabaseProfilesApi {
@@ -20,6 +20,8 @@ object SupabaseProfilesApi {
         val currentStreak: Int,
         val lastCompletedDate: LocalDate?,
         val lastCompletedDateBackup: LocalDate?,
+        val school: String?,
+        val yearInSchool: String?,
     )
 
     sealed class GetResult {
@@ -43,7 +45,7 @@ object SupabaseProfilesApi {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
             val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
             val query =
-                "select=id,currentStreak,lastCompletedDate,lastCompletedDateBackup&id=eq.$enc"
+                "select=id,currentStreak,lastCompletedDate,lastCompletedDateBackup,school,yearInSchool&id=eq.$enc"
             val url = URL("$base/rest/v1/profiles?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -67,6 +69,34 @@ object SupabaseProfilesApi {
             GetResult.Success(parseRow(arr.getJSONObject(0), id))
         } catch (e: Exception) {
             GetResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
+    /**
+     * Saves optional account fields on sign-up or from profile settings.
+     * PATCH when a row exists; POST a minimal row otherwise.
+     */
+    fun upsertAccountFields(
+        accessToken: String,
+        userId: String,
+        school: String?,
+        yearInSchool: String?,
+    ): PatchResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return PatchResult.Failure("Missing Supabase config.")
+        }
+        val id = userId.trim()
+        if (id.isEmpty()) return PatchResult.Failure("Missing user id.")
+        val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
+        val fields = JSONObject()
+            .put("school", school?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+            .put("yearInSchool", yearInSchool?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+
+        val patch = patchProfilesById(accessToken, enc, fields)
+        return when (patch) {
+            is PatchAttemptResult.Updated -> PatchResult.Success
+            is PatchAttemptResult.NoRowUpdated -> postNewProfileAccountFields(accessToken, id, school, yearInSchool)
+            is PatchAttemptResult.Error -> PatchResult.Failure(patch.message)
         }
     }
 
@@ -332,6 +362,50 @@ object SupabaseProfilesApi {
         }
     }
 
+    private fun postNewProfileAccountFields(
+        accessToken: String,
+        userId: String,
+        school: String?,
+        yearInSchool: String?,
+    ): PatchResult {
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val url = URL("$base/rest/v1/profiles")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=minimal")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject()
+                .put("id", userId)
+                .put("school", school?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+                .put("yearInSchool", yearInSchool?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+            val body = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(body.size)
+            connection.outputStream.use { it.write(body) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode in 200..299) {
+                PatchResult.Success
+            } else {
+                PatchResult.Failure(parseError(responseBody, responseCode))
+            }
+        } catch (e: Exception) {
+            PatchResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
     private fun postNewProfileStreak(
         accessToken: String,
         userId: String,
@@ -401,11 +475,25 @@ object SupabaseProfilesApi {
         }
         val backupLast = parseDateField(backupLastRaw)
 
+        val school = when {
+            obj.has("school") && !obj.isNull("school") -> obj.optString("school").trim().ifBlank { null }
+            else -> null
+        }
+        val yearInSchool = when {
+            obj.has("yearInSchool") && !obj.isNull("yearInSchool") ->
+                obj.optString("yearInSchool").trim().ifBlank { null }
+            obj.has("year_in_school") && !obj.isNull("year_in_school") ->
+                obj.optString("year_in_school").trim().ifBlank { null }
+            else -> null
+        }
+
         return ProfileRow(
             id = id,
             currentStreak = streak,
             lastCompletedDate = lastDate,
             lastCompletedDateBackup = backupLast,
+            school = school,
+            yearInSchool = yearInSchool,
         )
     }
 

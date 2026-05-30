@@ -204,12 +204,11 @@ object TodayPlanWork {
         return simple + complex
     }
 
-    /** Within a future focus day: simple tasks first, then complex steps. */
+    /** Within a future focus day: simple tasks first, then complex steps in roadmap order. */
     fun sortFutureDayEntries(entries: List<TodayPlanEntry>): List<TodayPlanEntry> {
         val simple = entries.filter { it.isSimple }.sortedBy { it.task.dueDate }
         val complex = entries.filter { !it.isSimple }.sortedWith(
-            compareBy<TodayPlanEntry> { it.step!!.priority }
-                .thenByDescending { it.step!!.estimatedHours ?: -1.0 }
+            compareBy<TodayPlanEntry> { it.task.dueDate }
                 .thenBy { it.stepIndex },
         )
         return simple + complex

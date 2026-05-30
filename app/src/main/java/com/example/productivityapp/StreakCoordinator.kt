@@ -27,6 +27,8 @@ object StreakCoordinator {
                 currentStreak = 0,
                 lastCompletedDate = null,
                 lastCompletedDateBackup = null,
+                school = null,
+                yearInSchool = null,
             )
             is SupabaseProfilesApi.GetResult.Failure -> {
                 Log.w("StreakCoordinator", "Could not load profile for streak; popup streak may be wrong.")

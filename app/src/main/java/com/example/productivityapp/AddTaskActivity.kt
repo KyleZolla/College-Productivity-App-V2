@@ -353,6 +353,7 @@ class AddTaskActivity : AppCompatActivity() {
                         }
 
                         val courseContext = resolveCourseContextForRoadmap(accessToken, selectedCourseId)
+                        val profileContext = resolveProfileContextForRoadmap(accessToken)
 
                         val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
@@ -366,6 +367,8 @@ class AddTaskActivity : AppCompatActivity() {
                             courseName = courseContext.first,
                             courseLevel = courseContext.second,
                             courseSyllabus = courseContext.third,
+                            school = profileContext.first,
+                            yearInSchool = profileContext.second,
                             userEstimatedHours = userEstimatedHours,
                         )) {
                             is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
@@ -448,6 +451,23 @@ class AddTaskActivity : AppCompatActivity() {
         val text = input.text?.toString()?.trim().orEmpty()
         if (text.isEmpty()) return null
         return text.toDoubleOrNull()
+    }
+
+    private fun resolveProfileContextForRoadmap(
+        accessToken: String,
+    ): Pair<String?, String?> {
+        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return Pair(null, null)
+        return when (val result = SupabaseProfilesApi.get(accessToken, userId)) {
+            is SupabaseProfilesApi.GetResult.Success -> Pair(result.row.school, result.row.yearInSchool)
+            is SupabaseProfilesApi.GetResult.NotFound,
+            is SupabaseProfilesApi.GetResult.Failure,
+            -> {
+                if (result is SupabaseProfilesApi.GetResult.Failure) {
+                    Log.w(logTag, "Could not load profile for roadmap.\n${result.message}")
+                }
+                Pair(null, null)
+            }
+        }
     }
 
     private fun resolveCourseContextForRoadmap(

@@ -30,6 +30,8 @@ object SupabaseEdgeFunctionsApi {
         courseName: String? = null,
         courseLevel: String? = null,
         courseSyllabus: String? = null,
+        school: String? = null,
+        yearInSchool: String? = null,
         userEstimatedHours: Double? = null,
     ): RoadmapResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
@@ -46,6 +48,8 @@ object SupabaseEdgeFunctionsApi {
             .put("courseName", courseName ?: JSONObject.NULL)
             .put("courseLevel", courseLevel ?: JSONObject.NULL)
             .put("courseSyllabus", courseSyllabus ?: JSONObject.NULL)
+            .put("school", school?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+            .put("yearInSchool", yearInSchool?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         if (userEstimatedHours != null) {
             payload.put("userEstimatedHours", userEstimatedHours)
         } else {

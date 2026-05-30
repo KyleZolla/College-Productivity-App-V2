@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.doAfterTextChanged
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -59,6 +60,9 @@ class MainActivity : AppCompatActivity() {
         confirmPasswordInput = findViewById(R.id.confirmPasswordInput)
         val firstNameInput = findViewById<EditText>(R.id.firstNameInput)
         val lastNameInput = findViewById<EditText>(R.id.lastNameInput)
+        val schoolInput = findViewById<EditText>(R.id.schoolInput)
+        val yearInSchoolDropdown = findViewById<MaterialAutoCompleteTextView>(R.id.yearInSchoolDropdown)
+        YearInSchoolHelper.bind(this, yearInSchoolDropdown, selected = null)
         val signUpButton = findViewById<Button>(R.id.signUpButton)
         val googleSignInButton = findViewById<Button>(R.id.googleSignInButton)
         val goToLoginButton = findViewById<Button>(R.id.goToLoginButton)
@@ -71,6 +75,8 @@ class MainActivity : AppCompatActivity() {
             createAccount(
                 firstNameInput,
                 lastNameInput,
+                schoolInput,
+                yearInSchoolDropdown,
                 emailInput,
                 passwordInput,
                 confirmPasswordInput,
@@ -118,6 +124,8 @@ class MainActivity : AppCompatActivity() {
     private fun createAccount(
         firstNameInput: EditText,
         lastNameInput: EditText,
+        schoolInput: EditText,
+        yearInSchoolDropdown: MaterialAutoCompleteTextView,
         emailInput: EditText,
         passwordInput: EditText,
         confirmPasswordInput: EditText,
@@ -126,6 +134,8 @@ class MainActivity : AppCompatActivity() {
     ) {
         val firstName = firstNameInput.text.toString().trim()
         val lastName = lastNameInput.text.toString().trim()
+        val school = schoolInput.text.toString().trim().ifBlank { null }
+        val yearInSchool = YearInSchoolHelper.selectedValue(yearInSchoolDropdown)
         val email = emailInput.text.toString().trim()
         val password = passwordInput.text.toString()
         val confirmPassword = confirmPasswordInput.text.toString()
@@ -153,12 +163,23 @@ class MainActivity : AppCompatActivity() {
         signUpRequestInFlight = true
         statusText.showAuthMessage(getString(R.string.status_working), AuthMessageTone.INSTRUCTION)
         signUpButton.isEnabled = false
-        performSignUpRequest(firstName, lastName, email, password, signUpButton, statusText)
+        performSignUpRequest(
+            firstName,
+            lastName,
+            school,
+            yearInSchool,
+            email,
+            password,
+            signUpButton,
+            statusText,
+        )
     }
 
     private fun performSignUpRequest(
         firstName: String,
         lastName: String,
+        school: String?,
+        yearInSchool: String?,
         email: String,
         password: String,
         signUpButton: Button,
@@ -217,6 +238,7 @@ class MainActivity : AppCompatActivity() {
                         if (accessToken.isNotBlank()) {
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
                             FcmTokenRegistrar.syncIfLoggedIn(this)
+                            saveSignupProfileFields(accessToken, school, yearInSchool)
                             val intent = Intent(this, HomeActivity::class.java)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                             startActivity(intent)
@@ -248,6 +270,18 @@ class MainActivity : AppCompatActivity() {
                     statusText.showAuthMessage(getString(R.string.status_network_error), AuthMessageTone.ERROR)
                 }
             }
+        }
+    }
+
+    private fun saveSignupProfileFields(
+        accessToken: String,
+        school: String?,
+        yearInSchool: String?,
+    ) {
+        if (school.isNullOrBlank() && yearInSchool.isNullOrBlank()) return
+        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return
+        networkExecutor.execute {
+            SupabaseProfilesApi.upsertAccountFields(accessToken, userId, school, yearInSchool)
         }
     }
 
