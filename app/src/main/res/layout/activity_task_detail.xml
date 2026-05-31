@@ -186,6 +186,31 @@
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                     <TextView
+                        android:id="@+id/taskDetailRoadmapConfidenceBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:background="@drawable/bg_roadmap_confidence_badge"
+                        android:paddingHorizontal="10dp"
+                        android:paddingVertical="4dp"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone"
+                        tools:text="Roadmap confidence: High"
+                        tools:visibility="visible" />
+
+                    <TextView
+                        android:id="@+id/taskDetailRoadmapConfidenceHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/task_detail_roadmap_confidence_low_hint"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+
+                    <TextView
                         android:id="@+id/taskDetailRoadmapProgressLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

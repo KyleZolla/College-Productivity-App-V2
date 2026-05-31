@@ -355,6 +355,16 @@ class AddTaskActivity : AppCompatActivity() {
                         val courseContext = resolveCourseContextForRoadmap(accessToken, selectedCourseId)
                         val profileContext = resolveProfileContextForRoadmap(accessToken)
 
+                        val roadmapConfidence = RoadmapConfidenceCalculator.calculate(
+                            RoadmapConfidenceInput(
+                                documentContent = documentContent,
+                                photoText = photoText,
+                                requirements = requirements,
+                                userEstimatedHours = userEstimatedHours,
+                                courseSelected = !selectedCourseId.isNullOrBlank(),
+                            ),
+                        )
+
                         val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
                             title = title,
@@ -379,6 +389,17 @@ class AddTaskActivity : AppCompatActivity() {
                         }
 
                         if (roadmapSteps.length() == 0) {
+                            when (val confidenceResult = SupabaseTasksApi.updateRoadmapConfidence(
+                                accessToken = accessToken,
+                                taskId = taskId,
+                                roadmapConfidence = roadmapConfidence,
+                            )) {
+                                is SupabaseTasksApi.PatchRoadmapResult.Failure -> Log.w(
+                                    logTag,
+                                    "Could not save roadmap confidence.\n${confidenceResult.message}",
+                                )
+                                SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
+                            }
                             runOnUiThread {
                                 Log.w(logTag, "Edge Function returned 0 steps; saving as simple task.")
                                 if (!isFinishing && !isDestroyed) {
@@ -394,7 +415,8 @@ class AddTaskActivity : AppCompatActivity() {
                             when (val patchResult = SupabaseTasksApi.updateTaskRoadmap(
                                 accessToken = accessToken,
                                 taskId = taskId,
-                                roadmapSteps = roadmapSteps
+                                roadmapSteps = roadmapSteps,
+                                roadmapConfidence = roadmapConfidence,
                             )) {
                                 is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
                                     val msg = "Could not save roadmap.\n${patchResult.message}"

@@ -131,6 +131,8 @@
     <string name="add_task_complex_fallback_message">Not enough information to build a roadmap. This task was saved as a simple task — you can mark it complete with a checkbox.</string>
     <string name="add_task_complex_fallback_title">Saved as simple task</string>
     <string name="task_detail_mark_complete">Mark complete</string>
+    <string name="task_detail_roadmap_confidence">Roadmap confidence: %1$s</string>
+    <string name="task_detail_roadmap_confidence_low_hint">Add instructions for a better roadmap.</string>
     <string name="due_date">Due date &amp; time</string>
     <string name="due_time_picker_title">Due time</string>
     <string name="due_relative_today_at">Today, %1$s</string>

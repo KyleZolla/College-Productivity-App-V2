@@ -47,6 +47,8 @@ class TaskDetailActivity : AppCompatActivity() {
     private lateinit var roadmapProgress: ProgressBar
     private lateinit var roadmapProgressLabel: TextView
     private lateinit var roadmapHoursSummary: TextView
+    private lateinit var roadmapConfidenceBadge: TextView
+    private lateinit var roadmapConfidenceHint: TextView
     private lateinit var roadmapList: RecyclerView
     private lateinit var roadmapAdapter: RoadmapStepsAdapter
     private lateinit var roadmapCard: com.google.android.material.card.MaterialCardView
@@ -115,6 +117,8 @@ class TaskDetailActivity : AppCompatActivity() {
         roadmapProgress = findViewById(R.id.taskDetailRoadmapProgress)
         roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
         roadmapHoursSummary = findViewById(R.id.taskDetailRoadmapHoursSummary)
+        roadmapConfidenceBadge = findViewById(R.id.taskDetailRoadmapConfidenceBadge)
+        roadmapConfidenceHint = findViewById(R.id.taskDetailRoadmapConfidenceHint)
         roadmapList = findViewById(R.id.taskDetailRoadmapList)
         roadmapAdapter = RoadmapStepsAdapter(
             onToggle = { index, checked -> onRoadmapStepToggled(index, checked) },
@@ -339,9 +343,12 @@ class TaskDetailActivity : AppCompatActivity() {
             roadmapProgressLabel.visibility = View.GONE
             roadmapHoursSummary.visibility = View.GONE
             roadmapProgress.visibility = View.GONE
+            roadmapConfidenceBadge.visibility = View.GONE
+            roadmapConfidenceHint.visibility = View.GONE
         } else {
             simpleCard.visibility = View.GONE
             roadmapCard.visibility = View.VISIBLE
+            refreshRoadmapConfidenceUi(task.roadmapConfidence)
             if (roadmapSteps.isNotEmpty()) {
                 roadmapAdapter.submitList(roadmapSteps)
             } else {
@@ -349,6 +356,18 @@ class TaskDetailActivity : AppCompatActivity() {
             }
             refreshRoadmapProgress()
         }
+    }
+
+    private fun refreshRoadmapConfidenceUi(confidence: RoadmapConfidence?) {
+        if (confidence == null) {
+            roadmapConfidenceBadge.visibility = View.GONE
+            roadmapConfidenceHint.visibility = View.GONE
+            return
+        }
+        roadmapConfidenceBadge.text = getString(R.string.task_detail_roadmap_confidence, confidence.apiValue)
+        roadmapConfidenceBadge.visibility = View.VISIBLE
+        roadmapConfidenceHint.visibility =
+            if (confidence == RoadmapConfidence.LOW) View.VISIBLE else View.GONE
     }
 
     private fun onSimpleTaskCompleteToggled(checked: Boolean) {

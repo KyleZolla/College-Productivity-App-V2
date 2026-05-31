@@ -25,7 +25,7 @@ enum class TaskListFilter {
 
 /**
  * `tasks` table via PostgREST.
- * Columns: id, userId, title, dueDate, status, roadmap, completedAt, courseId.
+ * Columns: id, userId, title, dueDate, status, roadmap, roadmapConfidence, completedAt, courseId.
  * `dueDate` is expected as `timestamptz` in Postgres (ISO-8601 with offset on write).
  *
  * `status` must match your DB (e.g. "Not Started", "In Progress", "Complete").
@@ -38,6 +38,7 @@ object SupabaseTasksApi {
         val dueDate: LocalDateTime?,
         val status: TaskStatus,
         val roadmap: JSONArray?,
+        val roadmapConfidence: RoadmapConfidence? = null,
         val completedAt: String? = null,
         val courseId: String? = null,
     )
@@ -125,7 +126,7 @@ object SupabaseTasksApi {
                 TaskListFilter.DELETED -> "order=deletedAt.desc.nullslast"
                 else -> "order=dueDate.asc.nullslast"
             }
-            val query = "select=id,title,dueDate,status,roadmap,completedAt,courseId&$filterParams&$orderParam"
+            val query = "select=id,title,dueDate,status,roadmap,roadmapConfidence,completedAt,courseId&$filterParams&$orderParam"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -183,9 +184,19 @@ object SupabaseTasksApi {
             dueDate = due,
             status = status,
             roadmap = roadmap,
+            roadmapConfidence = parseRoadmapConfidence(obj),
             completedAt = parseCompletedAt(completedAtRaw),
             courseId = parseCourseId(obj),
         )
+    }
+
+    private fun parseRoadmapConfidence(obj: JSONObject): RoadmapConfidence? {
+        val raw = when {
+            obj.has("roadmapConfidence") && !obj.isNull("roadmapConfidence") -> obj.get("roadmapConfidence")
+            obj.has("roadmap_confidence") && !obj.isNull("roadmap_confidence") -> obj.get("roadmap_confidence")
+            else -> null
+        }
+        return RoadmapConfidence.fromApi(raw?.toString())
     }
 
     private fun parseCourseId(obj: JSONObject): String? {
@@ -287,7 +298,7 @@ object SupabaseTasksApi {
         if (idFilter.isEmpty()) return GetResult.Failure("Missing task id.")
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
-            val query = "select=id,title,dueDate,status,roadmap,completedAt,courseId&id=eq.$idFilter"
+            val query = "select=id,title,dueDate,status,roadmap,roadmapConfidence,completedAt,courseId&id=eq.$idFilter"
             val url = URL("$base/rest/v1/tasks?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -556,7 +567,12 @@ object SupabaseTasksApi {
         }
     }
 
-    fun updateTaskRoadmap(accessToken: String, taskId: String, roadmapSteps: JSONArray): PatchRoadmapResult {
+    fun updateTaskRoadmap(
+        accessToken: String,
+        taskId: String,
+        roadmapSteps: JSONArray,
+        roadmapConfidence: RoadmapConfidence? = null,
+    ): PatchRoadmapResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return PatchRoadmapResult.Failure("Missing Supabase config.")
         }
@@ -579,6 +595,56 @@ object SupabaseTasksApi {
             connection.doOutput = true
 
             val payload = JSONObject().put("roadmap", roadmapSteps)
+            if (roadmapConfidence != null) {
+                payload.put("roadmapConfidence", roadmapConfidence.apiValue)
+            }
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode in 200..299) {
+                PatchRoadmapResult.Success
+            } else {
+                PatchRoadmapResult.Failure(parseError(responseBody, responseCode))
+            }
+        } catch (e: Exception) {
+            PatchRoadmapResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
+    fun updateRoadmapConfidence(
+        accessToken: String,
+        taskId: String,
+        roadmapConfidence: RoadmapConfidence,
+    ): PatchRoadmapResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return PatchRoadmapResult.Failure("Missing Supabase config.")
+        }
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val idFilter = taskId.trim()
+            if (idFilter.isEmpty()) {
+                return PatchRoadmapResult.Failure("Missing task id.")
+            }
+            val url = URL("$base/rest/v1/tasks?id=eq.$idFilter")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=minimal")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject().put("roadmapConfidence", roadmapConfidence.apiValue)
             val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(bodyBytes.size)
             connection.outputStream.use { it.write(bodyBytes) }
