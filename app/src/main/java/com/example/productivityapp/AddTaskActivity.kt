@@ -366,7 +366,7 @@ class AddTaskActivity : AppCompatActivity() {
                             photoText = photoText,
                             courseName = courseContext.first,
                             courseLevel = courseContext.second,
-                            courseSyllabus = courseContext.third,
+                            courseProfile = courseContext.third,
                             school = profileContext.first,
                             yearInSchool = profileContext.second,
                             userEstimatedHours = userEstimatedHours,
@@ -479,7 +479,7 @@ class AddTaskActivity : AppCompatActivity() {
             is SupabaseCoursesApi.GetResult.Success -> Triple(
                 result.course.name,
                 result.course.level,
-                result.course.syllabus,
+                result.course.courseProfile,
             )
             is SupabaseCoursesApi.GetResult.Failure -> {
                 Log.w(logTag, "Could not load course for roadmap.\n${result.message}")

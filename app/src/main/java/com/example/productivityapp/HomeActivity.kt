@@ -62,6 +62,15 @@ class HomeActivity : AppCompatActivity() {
     ) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
         loadMyCourses(showLoading = false)
+        if (currentTab == Tab.Home) {
+            loadHomeUpcoming(showLoading = false)
+        }
+        val wasEdit = result.data?.getBooleanExtra(AddCourseActivity.EXTRA_WAS_EDIT, false) == true
+        Toast.makeText(
+            this,
+            if (wasEdit) R.string.course_updated else R.string.course_saved,
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
@@ -289,7 +298,7 @@ class HomeActivity : AppCompatActivity() {
         profileCoursesList = findViewById(R.id.profileCoursesList)
 
         findViewById<MaterialButton>(R.id.addCourseButton).setOnClickListener {
-            addCourseLauncher.launch(Intent(this, AddCourseActivity::class.java))
+            addCourseLauncher.launch(AddCourseActivity.createIntent(this))
         }
 
         profileSaveAccountButton.setOnClickListener {
@@ -591,6 +600,9 @@ class HomeActivity : AppCompatActivity() {
             row.findViewById<TextView>(R.id.profileCourseName).text = course.name
             row.findViewById<TextView>(R.id.profileCourseLevel).text =
                 getString(R.string.course_level_display, course.level)
+            row.findViewById<MaterialButton>(R.id.profileCourseEditButton).setOnClickListener {
+                addCourseLauncher.launch(AddCourseActivity.editIntent(this, course.id))
+            }
             row.findViewById<MaterialButton>(R.id.profileCourseDeleteButton).setOnClickListener {
                 confirmDeleteCourse(course)
             }

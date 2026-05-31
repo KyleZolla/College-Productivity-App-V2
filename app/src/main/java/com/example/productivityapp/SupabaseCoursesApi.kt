@@ -10,7 +10,7 @@ import java.time.Instant
 
 /**
  * `courses` table via PostgREST.
- * Columns: id, userId, name, level, syllabus, created_at.
+ * Columns: id, userId, name, level, syllabus, course_profile, course_profile_updated_at, created_at.
  */
 object SupabaseCoursesApi {
 
@@ -19,6 +19,7 @@ object SupabaseCoursesApi {
         val name: String,
         val level: String,
         val syllabus: String? = null,
+        val courseProfile: String? = null,
     )
 
     sealed class ListResult {
@@ -31,6 +32,11 @@ object SupabaseCoursesApi {
         data class Failure(val message: String) : InsertResult()
     }
 
+    sealed class UpdateResult {
+        data class Success(val course: CourseRow) : UpdateResult()
+        data class Failure(val message: String) : UpdateResult()
+    }
+
     sealed class DeleteResult {
         object Success : DeleteResult()
         data class Failure(val message: String) : DeleteResult()
@@ -39,6 +45,11 @@ object SupabaseCoursesApi {
     sealed class GetResult {
         data class Success(val course: CourseRow) : GetResult()
         data class Failure(val message: String) : GetResult()
+    }
+
+    sealed class UpdateProfileResult {
+        object Success : UpdateProfileResult()
+        data class Failure(val message: String) : UpdateProfileResult()
     }
 
     fun getCourse(accessToken: String, courseId: String): GetResult {
@@ -50,7 +61,7 @@ object SupabaseCoursesApi {
         return try {
             val base = BuildConfig.SUPABASE_URL.trimEnd('/')
             val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
-            val query = "select=id,name,level,syllabus&id=eq.$enc"
+            val query = "select=id,name,level,syllabus,course_profile&id=eq.$enc"
             val url = URL("$base/rest/v1/courses?$query")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -181,6 +192,152 @@ object SupabaseCoursesApi {
         }
     }
 
+    fun updateCourse(
+        accessToken: String,
+        courseId: String,
+        name: String,
+        level: String,
+        syllabus: String?,
+    ): UpdateResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return UpdateResult.Failure("Missing Supabase config.")
+        }
+        val id = courseId.trim()
+        if (id.isEmpty()) return UpdateResult.Failure("Missing course id.")
+        val trimmedName = name.trim()
+        if (trimmedName.isEmpty()) return UpdateResult.Failure("Course name is required.")
+        val trimmedLevel = level.trim()
+        if (trimmedLevel.isEmpty()) return UpdateResult.Failure("Course level is required.")
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
+            val url = URL("$base/rest/v1/courses?id=eq.$enc")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=representation")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject()
+                .put("name", trimmedName)
+                .put("level", trimmedLevel)
+            if (syllabus.isNullOrBlank()) {
+                payload.put("syllabus", JSONObject.NULL)
+            } else {
+                payload.put("syllabus", syllabus)
+            }
+
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode !in 200..299) {
+                return UpdateResult.Failure(parseError(responseBody, responseCode))
+            }
+            val arr = JSONArray(responseBody)
+            if (arr.length() == 0) {
+                return UpdateResult.Failure(
+                    "No row was updated. Check that your Supabase RLS policy allows UPDATE on courses you own.",
+                )
+            }
+            parseCourseRow(arr.getJSONObject(0))?.let { UpdateResult.Success(it) }
+                ?: UpdateResult.Failure("Missing course id in response.")
+        } catch (e: Exception) {
+            UpdateResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
+    fun setCourseProfile(
+        accessToken: String,
+        courseId: String,
+        courseProfile: String,
+    ): UpdateProfileResult {
+        val trimmedProfile = courseProfile.trim()
+        if (trimmedProfile.isEmpty()) {
+            return UpdateProfileResult.Failure("Generated course profile was empty.")
+        }
+        return patchCourseProfileFields(
+            accessToken = accessToken,
+            courseId = courseId,
+            courseProfile = trimmedProfile,
+            courseProfileUpdatedAt = Instant.now().toString(),
+        )
+    }
+
+    fun clearCourseProfile(accessToken: String, courseId: String): UpdateProfileResult =
+        patchCourseProfileFields(
+            accessToken = accessToken,
+            courseId = courseId,
+            courseProfile = null,
+            courseProfileUpdatedAt = null,
+        )
+
+    private fun patchCourseProfileFields(
+        accessToken: String,
+        courseId: String,
+        courseProfile: String?,
+        courseProfileUpdatedAt: String?,
+    ): UpdateProfileResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return UpdateProfileResult.Failure("Missing Supabase config.")
+        }
+        val id = courseId.trim()
+        if (id.isEmpty()) return UpdateProfileResult.Failure("Missing course id.")
+        return try {
+            val base = BuildConfig.SUPABASE_URL.trimEnd('/')
+            val enc = URLEncoder.encode(id, StandardCharsets.UTF_8.name())
+            val url = URL("$base/rest/v1/courses?id=eq.$enc")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PATCH"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Prefer", "return=minimal")
+            connection.connectTimeout = 20000
+            connection.readTimeout = 20000
+            connection.doOutput = true
+
+            val payload = JSONObject()
+            if (courseProfile.isNullOrBlank()) {
+                payload.put("course_profile", JSONObject.NULL)
+                payload.put("course_profile_updated_at", JSONObject.NULL)
+            } else {
+                payload.put("course_profile", courseProfile)
+                payload.put("course_profile_updated_at", courseProfileUpdatedAt ?: Instant.now().toString())
+            }
+
+            val bodyBytes = payload.toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(bodyBytes.size)
+            connection.outputStream.use { it.write(bodyBytes) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode !in 200..299) {
+                UpdateProfileResult.Failure(parseError(responseBody, responseCode))
+            } else {
+                UpdateProfileResult.Success
+            }
+        } catch (e: Exception) {
+            UpdateProfileResult.Failure(e.message ?: "Network error.")
+        }
+    }
+
     /**
      * Clears [courseId] on related tasks, then removes the course row.
      */
@@ -248,7 +405,18 @@ object SupabaseCoursesApi {
             else -> null
         }
         val syllabus = syllabusRaw?.trim()?.takeIf { it.isNotEmpty() }
-        return CourseRow(id = id, name = name, level = level, syllabus = syllabus)
+        val courseProfileRaw = when {
+            obj.has("course_profile") && !obj.isNull("course_profile") -> obj.optString("course_profile")
+            else -> null
+        }
+        val courseProfile = courseProfileRaw?.trim()?.takeIf { it.isNotEmpty() }
+        return CourseRow(
+            id = id,
+            name = name,
+            level = level,
+            syllabus = syllabus,
+            courseProfile = courseProfile,
+        )
     }
 
     private fun parseError(body: String, code: Int): String {

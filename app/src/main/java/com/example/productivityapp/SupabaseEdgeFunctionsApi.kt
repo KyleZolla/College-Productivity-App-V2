@@ -18,6 +18,13 @@ object SupabaseEdgeFunctionsApi {
         data class Failure(val message: String) : RoadmapResult()
     }
 
+    sealed class CourseProfileResult {
+        data class Success(val courseProfile: String) : CourseProfileResult()
+        data class Failure(val message: String) : CourseProfileResult()
+    }
+
+    private const val GENERATE_COURSE_PROFILE_SLUG = "generate-course-profile"
+
     fun getRoadmap(
         accessToken: String,
         title: String,
@@ -29,7 +36,7 @@ object SupabaseEdgeFunctionsApi {
         photoText: String?,
         courseName: String? = null,
         courseLevel: String? = null,
-        courseSyllabus: String? = null,
+        courseProfile: String? = null,
         school: String? = null,
         yearInSchool: String? = null,
         userEstimatedHours: Double? = null,
@@ -47,7 +54,7 @@ object SupabaseEdgeFunctionsApi {
             .put("photoText", photoText ?: JSONObject.NULL)
             .put("courseName", courseName ?: JSONObject.NULL)
             .put("courseLevel", courseLevel ?: JSONObject.NULL)
-            .put("courseSyllabus", courseSyllabus ?: JSONObject.NULL)
+            .put("courseProfile", courseProfile ?: JSONObject.NULL)
             .put("school", school?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
             .put("yearInSchool", yearInSchool?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
         if (userEstimatedHours != null) {
@@ -72,6 +79,104 @@ object SupabaseEdgeFunctionsApi {
             }
         }
         return primary
+    }
+
+    fun generateCourseProfile(
+        courseName: String,
+        courseLevel: String,
+        courseSyllabus: String,
+    ): CourseProfileResult {
+        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+            return CourseProfileResult.Failure("Missing Supabase config.")
+        }
+        val payload = JSONObject()
+            .put("courseName", courseName.trim())
+            .put("courseLevel", courseLevel.trim())
+            .put("courseSyllabus", courseSyllabus.trim())
+        return callGenerateCourseProfileFunction(
+            BuildConfig.SUPABASE_URL.trimEnd('/'),
+            GENERATE_COURSE_PROFILE_SLUG,
+            payload,
+        )
+    }
+
+    private fun callGenerateCourseProfileFunction(
+        base: String,
+        slug: String,
+        payload: JSONObject,
+    ): CourseProfileResult {
+        return try {
+            val url = URL("$base/functions/v1/$slug")
+            Log.d("SupabaseEdgeFunctionsApi", "Calling Edge Function: $url")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            connection.setRequestProperty("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.connectTimeout = 60000
+            connection.readTimeout = 60000
+            connection.doOutput = true
+
+            connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+
+            val responseCode = connection.responseCode
+            val responseBody = (if (responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+
+            if (responseCode !in 200..299) {
+                val reason = parseError(responseBody, responseCode)
+                val msg = "HTTP $responseCode at $url\n$reason"
+                Log.e("SupabaseEdgeFunctionsApi", msg)
+                return CourseProfileResult.Failure(msg)
+            }
+
+            parseCourseProfile(responseBody) ?: run {
+                val snippet = responseBody.trim().take(800)
+                CourseProfileResult.Failure(
+                    "200 OK at $url but response did not contain courseProfile.\n\nBody snippet:\n$snippet",
+                )
+            }
+        } catch (e: Exception) {
+            val msg = e.message ?: "Network error."
+            Log.e("SupabaseEdgeFunctionsApi", msg, e)
+            CourseProfileResult.Failure(msg)
+        }
+    }
+
+    private fun parseCourseProfile(body: String): CourseProfileResult.Success? {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty()) return null
+        return try {
+            when {
+                trimmed.startsWith("{") -> {
+                    val obj = JSONObject(trimmed)
+                    val profile = when {
+                        obj.has("courseProfile") && !obj.isNull("courseProfile") ->
+                            obj.optString("courseProfile")
+                        obj.has("data") && !obj.isNull("data") -> {
+                            val data = obj.opt("data")
+                            when (data) {
+                                is JSONObject ->
+                                    if (data.has("courseProfile") && !data.isNull("courseProfile")) {
+                                        data.optString("courseProfile")
+                                    } else {
+                                        null
+                                    }
+                                else -> null
+                            }
+                        }
+                        else -> null
+                    }
+                    profile?.trim()?.takeIf { it.isNotEmpty() }?.let { CourseProfileResult.Success(it) }
+                }
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun loadEstimateFeedbackHistory(accessToken: String): JSONArray {

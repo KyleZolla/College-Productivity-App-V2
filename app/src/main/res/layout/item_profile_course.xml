@@ -32,6 +32,16 @@
     </LinearLayout>
 
     <com.google.android.material.button.MaterialButton
+        android:id="@+id/profileCourseEditButton"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="0dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:text="@string/course_edit" />
+
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/profileCourseDeleteButton"
         style="@style/Widget.Material3.Button.TextButton"
         android:layout_width="wrap_content"

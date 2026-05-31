@@ -226,8 +226,11 @@
     <string name="my_courses_load_failed">Could not load courses.</string>
     <string name="add_course">Add</string>
     <string name="add_course_title">Add course</string>
+    <string name="edit_course_title">Edit course</string>
     <string name="save_course">Save</string>
     <string name="status_saving_course">Saving…</string>
+    <string name="status_generating_course_profile">Generating course profile…</string>
+    <string name="course_profile_generation_failed">Course saved, but profile generation failed.</string>
     <string name="course_name_hint">Course name</string>
     <string name="course_level_label">Course level</string>
     <string name="course_level_100">100</string>
@@ -239,6 +242,7 @@
     <string name="course_syllabus_label">Syllabus upload</string>
     <string name="course_syllabus_subtitle">Optional — upload a document or photo to extract syllabus text</string>
     <string name="course_syllabus_none">No file selected</string>
+    <string name="course_syllabus_on_file">Syllabus saved — upload a new file to replace it</string>
     <string name="course_syllabus_doc_and_photo_selected">Document: %1$s\nPhoto: %2$s</string>
     <string name="course_syllabus_extract_skipped_title">Syllabus upload skipped</string>
     <string name="course_delete">Delete</string>
@@ -247,10 +251,14 @@
     <string name="course_delete_confirm_button">Delete</string>
     <string name="course_deleting">Deleting…</string>
     <string name="course_deleted">Course deleted.</string>
+    <string name="course_updated">Course updated.</string>
+    <string name="course_saved">Course saved.</string>
+    <string name="course_edit">Edit</string>
     <string name="error_course_delete_failed">Could not delete course.</string>
     <string name="error_course_name_required">Enter a course name.</string>
     <string name="error_course_level_required">Select a course level.</string>
     <string name="error_course_save_failed">Could not save course.</string>
+    <string name="error_course_load_failed">Could not load course.</string>
 
     <string name="task_course_label">Course</string>
     <string name="task_course_none">No course</string>
