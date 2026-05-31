@@ -22,6 +22,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.checkbox.MaterialCheckBox
+import com.google.android.material.chip.Chip
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -95,6 +96,20 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeTodayPlanStepsSummary: TextView
     private lateinit var homeTodayPlanHoursSummary: TextView
     private lateinit var homeTodayPlanHoursProgress: ProgressBar
+    private lateinit var homeTodayPlanTimeLimitBlock: LinearLayout
+    private lateinit var homeTodayPlanTimeLimitStatus: TextView
+    private lateinit var homeTodayPlanTimeLimitChip30m: Chip
+    private lateinit var homeTodayPlanTimeLimitChip1h: Chip
+    private lateinit var homeTodayPlanTimeLimitChip2h: Chip
+    private lateinit var homeTodayPlanTimeLimitChipCustom: Chip
+    private lateinit var homeTodayPlanTimeLimitChipClear: Chip
+    private lateinit var homeTodayPlanAdjustmentCard: MaterialCardView
+    private lateinit var homeTodayPlanAdjustmentSummary: TextView
+    private lateinit var homeTodayPlanAdjustmentFocusList: LinearLayout
+    private lateinit var homeTodayPlanAdjustmentMoveList: LinearLayout
+    private lateinit var homeTodayPlanAdjustmentBlockedNote: TextView
+    private lateinit var homeTodayPlanAdjustmentApply: MaterialButton
+    private lateinit var homeTodayPlanAdjustmentKeepOriginal: MaterialButton
     private lateinit var homeTodayPlanEmpty: TextView
     private lateinit var homeTodayPlanCompletedTodayHost: LinearLayout
     private lateinit var homeTodayPlanFutureReviewBeforeFocusHost: LinearLayout
@@ -150,6 +165,14 @@ class HomeActivity : AppCompatActivity() {
     /** When false, programmatic snackbar dismiss must not clear undo state. */
     private var overdueRecoverySnackbarDismissShouldFinalize = true
     private var overdueRecoveryOperationGeneration = 0
+
+    /** taskId|stepIndex -> original recommendedDate before a today-plan adjustment apply. */
+    private var todayPlanAdjustmentUndoSnapshot: Map<String, String>? = null
+    private var todayPlanAdjustmentUndoSnackbar: Snackbar? = null
+    private var todayPlanAdjustmentOperationGeneration = 0
+    private var todayPlanAdjustmentDismissed = false
+    private var todayPlanAdjustmentSuppressChipCallback = false
+    private var todayPlanAdjustmentCachedPlan: TodayPlanAdjustment.Plan? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -209,6 +232,27 @@ class HomeActivity : AppCompatActivity() {
         homeTodayPlanStepsSummary = findViewById(R.id.homeTodayPlanStepsSummary)
         homeTodayPlanHoursSummary = findViewById(R.id.homeTodayPlanHoursSummary)
         homeTodayPlanHoursProgress = findViewById(R.id.homeTodayPlanHoursProgress)
+        homeTodayPlanTimeLimitBlock = findViewById(R.id.homeTodayPlanTimeLimitBlock)
+        homeTodayPlanTimeLimitStatus = findViewById(R.id.homeTodayPlanTimeLimitStatus)
+        homeTodayPlanTimeLimitChip30m = findViewById(R.id.homeTodayPlanTimeLimit30m)
+        homeTodayPlanTimeLimitChip1h = findViewById(R.id.homeTodayPlanTimeLimit1h)
+        homeTodayPlanTimeLimitChip2h = findViewById(R.id.homeTodayPlanTimeLimit2h)
+        homeTodayPlanTimeLimitChipCustom = findViewById(R.id.homeTodayPlanTimeLimitCustom)
+        homeTodayPlanTimeLimitChipClear = findViewById(R.id.homeTodayPlanTimeLimitClear)
+        homeTodayPlanAdjustmentCard = findViewById(R.id.homeTodayPlanAdjustmentCard)
+        homeTodayPlanAdjustmentSummary = findViewById(R.id.homeTodayPlanAdjustmentSummary)
+        homeTodayPlanAdjustmentFocusList = findViewById(R.id.homeTodayPlanAdjustmentFocusList)
+        homeTodayPlanAdjustmentMoveList = findViewById(R.id.homeTodayPlanAdjustmentMoveList)
+        homeTodayPlanAdjustmentBlockedNote = findViewById(R.id.homeTodayPlanAdjustmentBlockedNote)
+        homeTodayPlanAdjustmentApply = findViewById(R.id.homeTodayPlanAdjustmentApply)
+        homeTodayPlanAdjustmentKeepOriginal = findViewById(R.id.homeTodayPlanAdjustmentKeepOriginal)
+        homeTodayPlanAdjustmentApply.setOnClickListener { applyTodayPlanAdjustment() }
+        homeTodayPlanAdjustmentKeepOriginal.setOnClickListener { dismissTodayPlanAdjustmentCard() }
+        homeTodayPlanTimeLimitChip30m.setOnClickListener { setTodayPlanTimeLimitMinutes(30) }
+        homeTodayPlanTimeLimitChip1h.setOnClickListener { setTodayPlanTimeLimitMinutes(60) }
+        homeTodayPlanTimeLimitChip2h.setOnClickListener { setTodayPlanTimeLimitMinutes(120) }
+        homeTodayPlanTimeLimitChipCustom.setOnClickListener { showCustomTodayPlanTimeLimitDialog() }
+        homeTodayPlanTimeLimitChipClear.setOnClickListener { clearTodayPlanTimeLimit() }
         homeTodayPlanEmpty = findViewById(R.id.homeTodayPlanEmpty)
         homeTodayPlanCompletedTodayHost = findViewById(R.id.homeTodayPlanCompletedTodayHost)
         homeTodayPlanFutureReviewBeforeFocusHost =
@@ -807,9 +851,9 @@ class HomeActivity : AppCompatActivity() {
         }
 
     /**
-     * Ordered review buckets: today only after the full day plan is complete; future days that are
-     * fully done and strictly before the active Get ahead focus day (or all future days when Get
-     * ahead is hidden but every step on that day is complete).
+     * Ordered review buckets: today only after the full day plan is complete; future days only when
+     * today's work is done — fully completed days before the active Get ahead focus, or all fully
+     * completed future days when Get ahead is hidden because everything ahead is done.
      */
     private fun buildCompletedReviewDays(
         todayEntries: List<TodayPlanEntry>,
@@ -818,10 +862,14 @@ class HomeActivity : AppCompatActivity() {
         getAheadVisible: Boolean,
         focusDay: LocalDate?,
         includeTodayReview: Boolean,
+        hasIncompleteToday: Boolean,
     ): List<Pair<LocalDate, List<TodayPlanEntry>>> {
         val out = ArrayList<Pair<LocalDate, List<TodayPlanEntry>>>()
         if (includeTodayReview && todayEntries.isNotEmpty()) {
             out.add(today to sortTodayPlanEntries(todayEntries, today))
+        }
+        if (hasIncompleteToday) {
+            return out
         }
         futureEntries.groupBy { it.recommendedOn }.toSortedMap().forEach { (day, list) ->
             if (list.isEmpty() || list.none { it.isCompleted }) return@forEach
@@ -1707,6 +1755,298 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    private fun bindTodayPlanTimeLimitAndAdjustment(
+        workEntries: List<TodayPlanEntry>,
+        today: LocalDate,
+    ) {
+        val incompleteComplex = TodayPlanAdjustment.incompleteComplexEntries(workEntries)
+        if (incompleteComplex.isEmpty()) {
+            homeTodayPlanTimeLimitBlock.visibility = View.GONE
+            homeTodayPlanAdjustmentCard.visibility = View.GONE
+            todayPlanAdjustmentCachedPlan = null
+            return
+        }
+
+        homeTodayPlanTimeLimitBlock.visibility = View.VISIBLE
+        val selectedMinutes = TodayPlanTimeLimitStore.getAvailableMinutes(this, today)
+        updateTodayPlanTimeLimitChipSelection(selectedMinutes)
+
+        if (selectedMinutes == null) {
+            homeTodayPlanTimeLimitStatus.visibility = View.GONE
+            homeTodayPlanAdjustmentCard.visibility = View.GONE
+            todayPlanAdjustmentCachedPlan = null
+            return
+        }
+
+        val availableHours = TodayPlanTimeLimitStore.minutesToHours(selectedMinutes)
+        val plan = TodayPlanAdjustment.computePlan(workEntries, availableHours, today)
+        todayPlanAdjustmentCachedPlan = plan
+
+        if (plan.fitsAvailableTime) {
+            homeTodayPlanTimeLimitStatus.visibility = View.VISIBLE
+            homeTodayPlanTimeLimitStatus.text = getString(R.string.home_today_plan_time_limit_fits)
+            homeTodayPlanAdjustmentCard.visibility = View.GONE
+            return
+        }
+
+        homeTodayPlanTimeLimitStatus.visibility = View.GONE
+        if (todayPlanAdjustmentDismissed) {
+            homeTodayPlanAdjustmentCard.visibility = View.GONE
+            return
+        }
+
+        homeTodayPlanAdjustmentCard.visibility = View.VISIBLE
+        homeTodayPlanAdjustmentSummary.text = getString(
+            R.string.home_today_plan_adjustment_over_budget,
+            formatPlanHoursLabel(plan.plannedHours),
+            formatPlanHoursLabel(plan.availableHours),
+        )
+        bindAdjustmentStepList(homeTodayPlanAdjustmentFocusList, plan.recommendedFocus)
+        bindAdjustmentStepList(homeTodayPlanAdjustmentMoveList, plan.moveLater)
+        if (plan.blockedOnToday.isNotEmpty()) {
+            homeTodayPlanAdjustmentBlockedNote.visibility = View.VISIBLE
+            val names = plan.blockedOnToday.joinToString { entry ->
+                entry.step?.title ?: entry.task.title
+            }
+            homeTodayPlanAdjustmentBlockedNote.text =
+                getString(R.string.home_today_plan_adjustment_blocked, names)
+        } else {
+            homeTodayPlanAdjustmentBlockedNote.visibility = View.GONE
+        }
+        val actionsEnabled = !homeRoadmapPatchInFlight
+        homeTodayPlanAdjustmentApply.isEnabled = actionsEnabled
+        homeTodayPlanAdjustmentKeepOriginal.isEnabled = actionsEnabled
+    }
+
+    private fun bindAdjustmentStepList(host: LinearLayout, entries: List<TodayPlanEntry>) {
+        host.removeAllViews()
+        val density = resources.displayMetrics.density
+        val topPad = (2 * density).toInt()
+        for (entry in entries) {
+            val line = TextView(this)
+            line.setPadding(0, topPad, 0, topPad)
+            line.setTextAppearance(com.google.android.material.R.style.TextAppearance_Material3_BodySmall)
+            line.setTextColor(
+                MaterialColors.getColor(line, com.google.android.material.R.attr.colorOnSurfaceVariant),
+            )
+            val title = entry.step?.title ?: entry.task.title
+            line.text = getString(
+                R.string.home_today_plan_adjustment_step_line,
+                title,
+                formatAdjustmentStepTime(entry),
+            )
+            host.addView(line)
+        }
+    }
+
+    private fun formatAdjustmentStepTime(entry: TodayPlanEntry): String {
+        val hours = TodayPlanAdjustment.stepHours(entry)
+        return when {
+            hours <= 0.0 -> getString(R.string.home_today_plan_step_time_unknown)
+            hours < 1.0 -> getString(
+                R.string.home_today_plan_step_time_minutes,
+                (hours * 60.0).roundToInt().coerceAtLeast(1),
+            )
+            else -> getString(R.string.home_today_plan_step_time_hours, hours)
+        }
+    }
+
+    private fun formatPlanHoursLabel(hours: Double): String {
+        if (hours <= 0.0) return "0 hrs"
+        val rounded = kotlin.math.round(hours * 10.0) / 10.0
+        val value = if (kotlin.math.abs(rounded - rounded.toInt()) < 0.05) {
+            rounded.toInt().toString()
+        } else {
+            String.format(Locale.getDefault(), "%.1f", rounded)
+        }
+        return if (rounded == 1.0) "$value hr" else "$value hrs"
+    }
+
+    private fun updateTodayPlanTimeLimitChipSelection(selectedMinutes: Int?) {
+        todayPlanAdjustmentSuppressChipCallback = true
+        homeTodayPlanTimeLimitChip30m.isChecked = selectedMinutes == 30
+        homeTodayPlanTimeLimitChip1h.isChecked = selectedMinutes == 60
+        homeTodayPlanTimeLimitChip2h.isChecked = selectedMinutes == 120
+        val isPreset = selectedMinutes == 30 || selectedMinutes == 60 || selectedMinutes == 120
+        homeTodayPlanTimeLimitChipCustom.isChecked = selectedMinutes != null && !isPreset
+        homeTodayPlanTimeLimitChipClear.isChecked = false
+        todayPlanAdjustmentSuppressChipCallback = false
+    }
+
+    private fun setTodayPlanTimeLimitMinutes(minutes: Int) {
+        if (todayPlanAdjustmentSuppressChipCallback) return
+        TodayPlanTimeLimitStore.setAvailableMinutes(this, minutes)
+        todayPlanAdjustmentDismissed = false
+        updateTodayPlanTimeLimitChipSelection(minutes)
+        bindHomeTodayPlan(homeTasksSnapshot)
+    }
+
+    private fun clearTodayPlanTimeLimit() {
+        if (todayPlanAdjustmentSuppressChipCallback) return
+        TodayPlanTimeLimitStore.clear(this)
+        todayPlanAdjustmentDismissed = false
+        todayPlanAdjustmentCachedPlan = null
+        dismissTodayPlanAdjustmentUndoSnackbar(finalize = true)
+        updateTodayPlanTimeLimitChipSelection(null)
+        bindHomeTodayPlan(homeTasksSnapshot)
+    }
+
+    private fun showCustomTodayPlanTimeLimitDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_today_plan_custom_time, null)
+        val hoursInput = dialogView.findViewById<TextInputEditText>(R.id.customTimeHours)
+        val minutesInput = dialogView.findViewById<TextInputEditText>(R.id.customTimeMinutes)
+        val existing = TodayPlanTimeLimitStore.getAvailableMinutes(this)
+        if (existing != null) {
+            hoursInput.setText((existing / 60).toString())
+            minutesInput.setText((existing % 60).toString())
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.home_today_plan_time_limit_custom_title)
+            .setView(dialogView)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.save_course) { _, _ ->
+                val hours = hoursInput.text?.toString()?.trim()?.toIntOrNull() ?: 0
+                val minutes = minutesInput.text?.toString()?.trim()?.toIntOrNull() ?: 0
+                val totalMinutes = (hours.coerceAtLeast(0) * 60) + minutes.coerceAtLeast(0)
+                if (totalMinutes <= 0) {
+                    Toast.makeText(this, R.string.home_today_plan_time_limit_invalid, Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                setTodayPlanTimeLimitMinutes(totalMinutes)
+            }
+            .show()
+    }
+
+    private fun dismissTodayPlanAdjustmentCard() {
+        todayPlanAdjustmentDismissed = true
+        homeTodayPlanAdjustmentCard.visibility = View.GONE
+    }
+
+    private fun applyTodayPlanAdjustment() {
+        if (homeRoadmapPatchInFlight) return
+        val plan = todayPlanAdjustmentCachedPlan ?: return
+        if (plan.fitsAvailableTime) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        val today = LocalDate.now()
+        val updates = TodayPlanAdjustment.buildApplyUpdates(plan, today)
+        if (updates.isEmpty() && plan.blockedOnToday.isEmpty()) return
+
+        val undoSnapshot = TodayPlanAdjustment.captureOriginalDates(plan.moveLater)
+        if (undoSnapshot.isEmpty() && updates.isEmpty()) return
+
+        val opGen = ++todayPlanAdjustmentOperationGeneration
+        todayPlanAdjustmentUndoSnapshot = undoSnapshot
+        todayPlanAdjustmentDismissed = true
+
+        homeRoadmapPatchInFlight = true
+        homeTodayPlanAdjustmentApply.isEnabled = false
+        homeTodayPlanAdjustmentKeepOriginal.isEnabled = false
+        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates)
+        bindHomeTodayPlan(homeTasksSnapshot)
+        showTodayPlanAdjustmentUndoSnackbar()
+
+        networkExecutor.execute {
+            var failureMessage: String? = null
+            for (update in updates) {
+                when (val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)) {
+                    is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
+                    is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
+                        failureMessage = result.message
+                        break
+                    }
+                }
+            }
+            runOnUiThread {
+                homeRoadmapPatchInFlight = false
+                if (isFinishing || opGen != todayPlanAdjustmentOperationGeneration) return@runOnUiThread
+                homeTodayPlanAdjustmentApply.isEnabled = true
+                homeTodayPlanAdjustmentKeepOriginal.isEnabled = true
+                if (failureMessage != null) {
+                    dismissTodayPlanAdjustmentUndoSnackbar(finalize = true)
+                    todayPlanAdjustmentUndoSnapshot = null
+                    Toast.makeText(
+                        this,
+                        getString(R.string.home_today_plan_adjustment_failed, failureMessage),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    loadHomeUpcoming(showLoading = false)
+                } else {
+                    loadHomeUpcoming(showLoading = false)
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showTodayPlanAdjustmentUndoSnackbar() {
+        dismissTodayPlanAdjustmentUndoSnackbar(finalize = false)
+        val snackbar = Snackbar.make(
+            homeRoot,
+            getString(R.string.home_today_plan_adjustment_applied),
+            Snackbar.LENGTH_LONG,
+        )
+            .setAction(R.string.undo) { undoTodayPlanAdjustment() }
+            .setAnchorView(findViewById(R.id.bottomNavBar))
+        todayPlanAdjustmentUndoSnackbar = snackbar
+        snackbar.show()
+    }
+
+    private fun dismissTodayPlanAdjustmentUndoSnackbar(finalize: Boolean) {
+        todayPlanAdjustmentUndoSnackbar?.dismiss()
+        todayPlanAdjustmentUndoSnackbar = null
+        if (finalize) {
+            todayPlanAdjustmentUndoSnapshot = null
+        }
+    }
+
+    private fun undoTodayPlanAdjustment() {
+        val originalDates = todayPlanAdjustmentUndoSnapshot ?: return
+        if (originalDates.isEmpty()) return
+        val token = SessionManager.getAccessToken(this) ?: return
+        val updates = TodayPlanAdjustment.buildRestoreUpdates(originalDates, homeTasksSnapshot)
+        if (updates.isEmpty()) return
+
+        dismissTodayPlanAdjustmentUndoSnackbar(finalize = false)
+        val opGen = ++todayPlanAdjustmentOperationGeneration
+        homeRoadmapPatchInFlight = true
+        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates)
+        todayPlanAdjustmentUndoSnapshot = null
+        todayPlanAdjustmentDismissed = false
+        bindHomeTodayPlan(homeTasksSnapshot)
+
+        networkExecutor.execute {
+            var failureMessage: String? = null
+            for (update in updates) {
+                when (val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)) {
+                    is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
+                    is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
+                        failureMessage = result.message
+                        break
+                    }
+                }
+            }
+            runOnUiThread {
+                homeRoadmapPatchInFlight = false
+                if (isFinishing || opGen != todayPlanAdjustmentOperationGeneration) return@runOnUiThread
+                if (failureMessage != null) {
+                    Toast.makeText(
+                        this,
+                        getString(R.string.home_today_plan_adjustment_failed, failureMessage),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    loadHomeUpcoming(showLoading = false)
+                } else {
+                    loadHomeUpcoming(showLoading = false)
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
+                }
+            }
+        }
+    }
+
     private fun bindHomeTodayPlan(allActiveTasks: List<SupabaseTasksApi.TaskRow>) {
         homeTasksSnapshot = allActiveTasks
         homeTodayPlanSection.visibility = View.VISIBLE
@@ -1719,7 +2059,6 @@ class HomeActivity : AppCompatActivity() {
         val todayPlanComplete = isTodayWorkPlanComplete(allActiveTasks, today)
         val reviewTodayEntries = todayPlanCompletedReviewEntries(allActiveTasks, today)
         val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
-        val hasStartedFutureWork = futureEntries.any { it.isCompleted }
 
         if (progressEntries.isEmpty() || !hasIncomplete) {
             homeTodayPlanProgressBlock.visibility = View.GONE
@@ -1733,6 +2072,8 @@ class HomeActivity : AppCompatActivity() {
                 stepsSummaryRes = R.string.home_today_plan_steps_summary,
             )
         }
+
+        bindTodayPlanTimeLimitAndAdjustment(workEntries, today)
 
         if (hasIncomplete) {
             homeTodayPlanEmpty.visibility = View.GONE
@@ -1753,13 +2094,11 @@ class HomeActivity : AppCompatActivity() {
             homeTodayPlanGroups.removeAllViews()
         }
 
-        val getAheadVisible = when {
-            !hasIncomplete -> bindGetAheadSection(allActiveTasks, today)
-            hasStartedFutureWork -> bindGetAheadSection(allActiveTasks, today)
-            else -> {
-                clearGetAheadSection()
-                false
-            }
+        val getAheadVisible = if (!hasIncomplete) {
+            bindGetAheadSection(allActiveTasks, today)
+        } else {
+            clearGetAheadSection()
+            false
         }
 
         val reviewDays = buildCompletedReviewDays(
@@ -1769,6 +2108,7 @@ class HomeActivity : AppCompatActivity() {
             getAheadVisible,
             homeGetAheadFocusDate,
             includeTodayReview = todayPlanComplete,
+            hasIncompleteToday = hasIncomplete,
         )
         val expandedReviewValidDays = reviewDays.map { it.first }.toMutableSet()
         if (getAheadVisible && homeGetAheadFocusDate != null &&

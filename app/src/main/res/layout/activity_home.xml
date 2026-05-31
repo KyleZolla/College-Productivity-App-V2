@@ -180,6 +180,10 @@
                                     tools:progress="350" />
                             </LinearLayout>
 
+                            <include layout="@layout/include_home_today_plan_time_limit" />
+
+                            <include layout="@layout/include_home_today_plan_adjustment" />
+
                             <TextView
                                 android:id="@+id/homeTodayPlanEmpty"
                                 android:layout_width="match_parent"
