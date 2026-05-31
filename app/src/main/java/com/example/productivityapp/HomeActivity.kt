@@ -807,8 +807,9 @@ class HomeActivity : AppCompatActivity() {
         }
 
     /**
-     * Ordered review buckets: today only after the full day plan is complete; future days when at
-     * least one step is completed (excluding the focused Get ahead day while that section is visible).
+     * Ordered review buckets: today only after the full day plan is complete; future days that are
+     * fully done and strictly before the active Get ahead focus day (or all future days when Get
+     * ahead is hidden but every step on that day is complete).
      */
     private fun buildCompletedReviewDays(
         todayEntries: List<TodayPlanEntry>,
@@ -823,9 +824,18 @@ class HomeActivity : AppCompatActivity() {
             out.add(today to sortTodayPlanEntries(todayEntries, today))
         }
         futureEntries.groupBy { it.recommendedOn }.toSortedMap().forEach { (day, list) ->
-            // Keep a future day visible once it has any completed work, even if not fully done yet.
             if (list.isEmpty() || list.none { it.isCompleted }) return@forEach
-            if (getAheadVisible && focusDay != null && day == focusDay) return@forEach
+            val allDoneOnDay = list.all { it.isCompleted }
+            when {
+                getAheadVisible && focusDay != null -> {
+                    if (day == focusDay) return@forEach
+                    if (!day.isBefore(focusDay)) return@forEach
+                    if (!allDoneOnDay) return@forEach
+                }
+                else -> {
+                    if (!allDoneOnDay) return@forEach
+                }
+            }
             out.add(day to sortGetAheadDayEntries(list))
         }
         return out
@@ -833,6 +843,30 @@ class HomeActivity : AppCompatActivity() {
 
     private fun formatTodayPlanCollapsedEmptyText(): String =
         getString(R.string.home_today_plan_empty_ahead)
+
+    /** Shown when today has no active steps left — even if Get ahead or review sections are visible. */
+    private fun bindTodayPlanIdleMessage(
+        hasIncomplete: Boolean,
+        workEntries: List<TodayPlanEntry>,
+        reviewDays: List<Pair<LocalDate, List<TodayPlanEntry>>>,
+        today: LocalDate,
+    ) {
+        if (hasIncomplete) {
+            homeTodayPlanEmpty.visibility = View.GONE
+            return
+        }
+        val todayReviewVisible = reviewDays.any { (day, list) -> day == today && list.isNotEmpty() }
+        if (todayReviewVisible) {
+            homeTodayPlanEmpty.visibility = View.GONE
+            return
+        }
+        homeTodayPlanEmpty.text = if (workEntries.isEmpty()) {
+            formatTodayPlanCollapsedEmptyText()
+        } else {
+            getString(R.string.home_today_plan_all_done_banner_today)
+        }
+        homeTodayPlanEmpty.visibility = View.VISIBLE
+    }
 
     private fun pruneCompletedReviewExpandedDays(validDays: Set<LocalDate>) {
         homeCompletedReviewDaysExpanded.removeAll { key ->
@@ -1051,27 +1085,13 @@ class HomeActivity : AppCompatActivity() {
     private fun sortGetAheadDayEntries(dayEntries: List<TodayPlanEntry>): List<TodayPlanEntry> =
         TodayPlanWork.sortFutureDayEntries(dayEntries)
 
-    private fun resolveGetAheadFocusDate(
-        futureEntries: List<TodayPlanEntry>,
-        requireStartedOnFocusDay: Boolean,
-    ): LocalDate? {
-        val incompleteDays = futureEntries.groupBy { it.recommendedOn }
+    /** Earliest future calendar day that still has at least one incomplete step. */
+    private fun resolveGetAheadFocusDate(futureEntries: List<TodayPlanEntry>): LocalDate? =
+        futureEntries.groupBy { it.recommendedOn }
             .toSortedMap()
             .entries
-            .mapNotNull { (day, list) ->
-                val hasIncomplete = list.any { !it.isCompleted }
-                if (!hasIncomplete) return@mapNotNull null
-                if (requireStartedOnFocusDay && list.none { it.isCompleted }) return@mapNotNull null
-                day
-            }
-        if (incompleteDays.isNotEmpty()) {
-            // Earliest calendar day with any incomplete step (e.g. after unchecking “done early” work).
-            return incompleteDays.first()
-        }
-        return homeGetAheadPinnedCheckedKeys.mapNotNull { key ->
-            futureEntries.find { todayPlanEntryKey(it) == key }
-        }.map { it.recommendedOn }.minOrNull()
-    }
+            .firstOrNull { (_, list) -> list.any { !it.isCompleted } }
+            ?.key
 
     private fun buildGetAheadCollapsedVisible(dayEntries: List<TodayPlanEntry>): List<TodayPlanEntry> {
         val sorted = sortGetAheadDayEntries(dayEntries)
@@ -1104,7 +1124,6 @@ class HomeActivity : AppCompatActivity() {
     private fun bindGetAheadSection(
         allActiveTasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
-        requireStartedOnFocusDay: Boolean = false,
     ): Boolean {
         var iterations = 0
         while (iterations++ < 400) {
@@ -1114,10 +1133,7 @@ class HomeActivity : AppCompatActivity() {
                 clearGetAheadSection()
                 return false
             }
-            val focus = resolveGetAheadFocusDate(
-                futureEntries = futureEntries,
-                requireStartedOnFocusDay = requireStartedOnFocusDay,
-            ) ?: run {
+            val focus = resolveGetAheadFocusDate(futureEntries) ?: run {
                 clearGetAheadSection()
                 return false
             }
@@ -1149,7 +1165,6 @@ class HomeActivity : AppCompatActivity() {
             )
             val visible = buildGetAheadCollapsedVisible(dayEntries)
             bindPlanStepRows(homeGetAheadGroups, visible)
-            bindGetAheadFocusDayCompletedReview(focus, dayEntries)
             return true
         }
         clearGetAheadSection()
@@ -1157,9 +1172,17 @@ class HomeActivity : AppCompatActivity() {
     }
 
     /** Collapsible completed steps for the active Get ahead day (progress stays in the header above). */
-    private fun bindGetAheadFocusDayCompletedReview(focusDay: LocalDate, dayEntries: List<TodayPlanEntry>) {
+    private fun bindGetAheadFocusDayCompletedReview(
+        focusDay: LocalDate,
+        dayEntries: List<TodayPlanEntry>,
+        visibleInMainListKeys: Set<String>,
+    ) {
         homeGetAheadCompletedReviewHost.removeAllViews()
-        val completed = sortGetAheadDayEntries(dayEntries.filter { it.isCompleted })
+        val completed = sortGetAheadDayEntries(
+            dayEntries.filter {
+                it.isCompleted && todayPlanEntryKey(it) !in visibleInMainListKeys
+            },
+        )
         if (completed.isEmpty()) {
             homeGetAheadCompletedReviewHost.visibility = View.GONE
             return
@@ -1732,11 +1755,7 @@ class HomeActivity : AppCompatActivity() {
 
         val getAheadVisible = when {
             !hasIncomplete -> bindGetAheadSection(allActiveTasks, today)
-            hasStartedFutureWork -> bindGetAheadSection(
-                allActiveTasks = allActiveTasks,
-                today = today,
-                requireStartedOnFocusDay = true,
-            )
+            hasStartedFutureWork -> bindGetAheadSection(allActiveTasks, today)
             else -> {
                 clearGetAheadSection()
                 false
@@ -1751,23 +1770,31 @@ class HomeActivity : AppCompatActivity() {
             homeGetAheadFocusDate,
             includeTodayReview = todayPlanComplete,
         )
-        pruneCompletedReviewExpandedDays(reviewDays.map { it.first }.toSet())
+        val expandedReviewValidDays = reviewDays.map { it.first }.toMutableSet()
+        if (getAheadVisible && homeGetAheadFocusDate != null &&
+            futureEntries.any { it.recommendedOn == homeGetAheadFocusDate && it.isCompleted }
+        ) {
+            expandedReviewValidDays.add(homeGetAheadFocusDate!!)
+        }
+        pruneCompletedReviewExpandedDays(expandedReviewValidDays)
         bindCompletedReviewByDay(
             reviewDays = reviewDays,
             today = today,
             getAheadVisible = getAheadVisible,
             focusDay = homeGetAheadFocusDate,
         )
+        if (getAheadVisible && homeGetAheadFocusDate != null) {
+            val focusEntries = futureEntries.filter { it.recommendedOn == homeGetAheadFocusDate }
+            val visibleInMain = buildGetAheadCollapsedVisible(focusEntries)
+            val visibleKeys = visibleInMain.map { todayPlanEntryKey(it) }.toSet()
+            bindGetAheadFocusDayCompletedReview(homeGetAheadFocusDate!!, focusEntries, visibleKeys)
+        } else {
+            homeGetAheadCompletedReviewHost.removeAllViews()
+            homeGetAheadCompletedReviewHost.visibility = View.GONE
+        }
 
         val hasAnythingVisible = hasIncomplete || reviewDays.isNotEmpty() || getAheadVisible
-        if (!hasAnythingVisible) {
-            homeTodayPlanEmpty.text = formatTodayPlanCollapsedEmptyText()
-            homeTodayPlanEmpty.visibility = View.VISIBLE
-        } else if (hasIncomplete) {
-            homeTodayPlanEmpty.visibility = View.GONE
-        } else {
-            homeTodayPlanEmpty.visibility = View.GONE
-        }
+        bindTodayPlanIdleMessage(hasIncomplete, workEntries, reviewDays, today)
         if (!hasAnythingVisible) {
             homeTodayPlanCompletedTodayHost.visibility = View.GONE
             homeTodayPlanCompletedTodayHost.removeAllViews()
@@ -1931,22 +1958,11 @@ class HomeActivity : AppCompatActivity() {
                 if (checked) {
                     homeGetAheadPinnedCheckedKeys.add(pinKey)
                 } else {
-                    // If a fully completed future day becomes active again, keep sibling completed
-                    // rows visible in collapsed Get ahead so they can still be reviewed/toggled.
-                    val day = rec
-                    if (day != null) {
-                        val futureEntries = collectFuturePlanEntries(homeTasksSnapshot, today)
-                        futureEntries.forEach { e ->
-                            if (
-                                e.recommendedOn == day &&
-                                e.isCompleted &&
-                                !(e.task.id == taskId && e.stepIndex == stepIndex)
-                            ) {
-                                homeGetAheadPinnedCheckedKeys.add(todayPlanEntryKey(e))
-                            }
-                        }
+                    homeGetAheadPinnedCheckedKeys.removeAll { key ->
+                        collectFuturePlanEntries(homeTasksSnapshot, today)
+                            .find { todayPlanEntryKey(it) == key }
+                            ?.recommendedOn == rec
                     }
-                    homeGetAheadPinnedCheckedKeys.remove(pinKey)
                 }
                 homeTodayPlanPinnedCheckedKeys.remove(pinKey)
             }
