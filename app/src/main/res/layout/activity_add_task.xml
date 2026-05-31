@@ -366,6 +366,27 @@
                         android:text="@string/add_task_ai_questions_type_homework" />
 
                     <com.google.android.material.chip.Chip
+                        android:id="@+id/chipAssignmentReading"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/add_task_ai_questions_type_reading" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipAssignmentDiscussionPost"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/add_task_ai_questions_type_discussion_post" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/chipAssignmentLabReport"
+                        style="@style/Widget.Material3.Chip.Filter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/add_task_ai_questions_type_lab_report" />
+
+                    <com.google.android.material.chip.Chip
                         android:id="@+id/chipAssignmentOther"
                         style="@style/Widget.Material3.Chip.Filter"
                         android:layout_width="wrap_content"

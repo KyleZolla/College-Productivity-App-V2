@@ -304,6 +304,14 @@
                                     android:layout_marginTop="12dp"
                                     android:animateLayoutChanges="true"
                                     android:orientation="vertical" />
+
+                                <LinearLayout
+                                    android:id="@+id/homeGetAheadCompletedReviewHost"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:animateLayoutChanges="true"
+                                    android:orientation="vertical"
+                                    android:visibility="gone" />
                             </LinearLayout>
 
                             <LinearLayout

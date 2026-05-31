@@ -9,14 +9,23 @@ import androidx.recyclerview.widget.RecyclerView
 
 class RoadmapStepsAdapter(
     private val onToggle: (index: Int, checked: Boolean) -> Unit,
+    private val shouldShowEstimateFeedback: (index: Int, step: RoadmapStep) -> Boolean,
+    private val onEstimateFeedbackSelected: (index: Int, feedback: String) -> Unit,
 ) : RecyclerView.Adapter<RoadmapStepsAdapter.VH>() {
 
     private val items = ArrayList<RoadmapStep>()
     private var suppressCallback = false
+    private var interactionEnabled = true
 
     fun submitList(steps: List<RoadmapStep>) {
         items.clear()
         items.addAll(steps)
+        notifyDataSetChanged()
+    }
+
+    fun setInteractionEnabled(enabled: Boolean) {
+        if (interactionEnabled == enabled) return
+        interactionEnabled = enabled
         notifyDataSetChanged()
     }
 
@@ -43,10 +52,18 @@ class RoadmapStepsAdapter(
         holder.check.isChecked = item.completed
         suppressCallback = false
 
+        holder.check.isEnabled = interactionEnabled
         holder.check.setOnCheckedChangeListener { _, isChecked ->
             if (suppressCallback) return@setOnCheckedChangeListener
             onToggle(position, isChecked)
         }
+
+        RoadmapEstimateFeedbackUi.bind(
+            root = holder.itemView,
+            showPrompt = shouldShowEstimateFeedback(position, item),
+            enabled = true,
+            onFeedbackSelected = { feedback -> onEstimateFeedbackSelected(position, feedback) },
+        )
     }
 
     private fun trimHours(v: Double): String {
@@ -63,4 +80,3 @@ class RoadmapStepsAdapter(
         val estimatedHours: TextView = root.findViewById(R.id.roadmapStepEstimatedHours)
     }
 }
-

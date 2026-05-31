@@ -53,6 +53,8 @@ class TaskDetailActivity : AppCompatActivity() {
     private lateinit var simpleCard: com.google.android.material.card.MaterialCardView
     private lateinit var simpleCompleteCheck: com.google.android.material.checkbox.MaterialCheckBox
     private var roadmapSteps: MutableList<RoadmapStep> = mutableListOf()
+    private val estimateFeedbackAnsweredStepIndices = mutableSetOf<Int>()
+    private var currentTaskRow: SupabaseTasksApi.TaskRow? = null
     private var roadmapPatchInFlight = false
     private var statusPatchInFlight = false
     private var deleteInFlight = false
@@ -114,7 +116,15 @@ class TaskDetailActivity : AppCompatActivity() {
         roadmapProgressLabel = findViewById(R.id.taskDetailRoadmapProgressLabel)
         roadmapHoursSummary = findViewById(R.id.taskDetailRoadmapHoursSummary)
         roadmapList = findViewById(R.id.taskDetailRoadmapList)
-        roadmapAdapter = RoadmapStepsAdapter { index, checked -> onRoadmapStepToggled(index, checked) }
+        roadmapAdapter = RoadmapStepsAdapter(
+            onToggle = { index, checked -> onRoadmapStepToggled(index, checked) },
+            shouldShowEstimateFeedback = { index, step ->
+                step.completed && index !in estimateFeedbackAnsweredStepIndices
+            },
+            onEstimateFeedbackSelected = { index, feedback ->
+                onRoadmapEstimateFeedbackSelected(index, feedback)
+            },
+        )
         roadmapList.layoutManager = LinearLayoutManager(this)
         roadmapList.adapter = roadmapAdapter
 
@@ -258,26 +268,54 @@ class TaskDetailActivity : AppCompatActivity() {
                     if (isFinishing) return@runOnUiThread
                     Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
                 }
-                is SupabaseTasksApi.GetResult.Success -> runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
-                    if (activeTasksResult is SupabaseTasksApi.ListResult.Success) {
-                        activeTasksSnapshot = activeTasksResult.tasks
+                is SupabaseTasksApi.GetResult.Success -> {
+                    val userId = achievementsUserId
+                    val answeredForTask = if (userId != null) {
+                        when (val keys = SupabaseRoadmapStepEstimateFeedbackApi.listAnsweredKeys(token, userId)) {
+                            is SupabaseRoadmapStepEstimateFeedbackApi.ListResult.Success ->
+                                keys.answeredKeys
+                                    .mapNotNull { entry ->
+                                        val parts = entry.split(':', limit = 2)
+                                        if (parts.size == 2 && parts[0] == taskId) {
+                                            parts[1].toIntOrNull()
+                                        } else {
+                                            null
+                                        }
+                                    }
+                                    .toSet()
+                            is SupabaseRoadmapStepEstimateFeedbackApi.ListResult.Failure -> emptySet()
+                        }
+                    } else {
+                        emptySet()
                     }
-                    savedStatus = result.task.status
-                    refreshStatusLine(savedStatus)
-                    savedDue = result.task.dueDate
-                    draftDue = savedDue
-                    refreshDueLabel()
-                    savedCourseId = result.task.courseId
-                    loadCoursesForSelector(savedCourseId)
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        if (activeTasksResult is SupabaseTasksApi.ListResult.Success) {
+                            activeTasksSnapshot = activeTasksResult.tasks
+                        }
+                        currentTaskRow = result.task
+                        savedStatus = result.task.status
+                        refreshStatusLine(savedStatus)
+                        savedDue = result.task.dueDate
+                        draftDue = savedDue
+                        refreshDueLabel()
+                        savedCourseId = result.task.courseId
+                        loadCoursesForSelector(savedCourseId)
 
-                    roadmapSteps = RoadmapStep.parseList(result.task.roadmap).toMutableList()
-                    refreshSimpleOrRoadmapUi(result.task)
+                        roadmapSteps = RoadmapStep.parseList(result.task.roadmap).toMutableList()
+                        estimateFeedbackAnsweredStepIndices.clear()
+                        estimateFeedbackAnsweredStepIndices.addAll(
+                            answeredForTask.filter { idx ->
+                                idx in roadmapSteps.indices && roadmapSteps[idx].completed
+                            },
+                        )
+                        refreshSimpleOrRoadmapUi(result.task)
 
-                    if (!TaskKind.isSimpleTask(result.task)) {
-                        val derived = deriveStatusFromSteps(roadmapSteps)
-                        if (derived != savedStatus) {
-                            persistDerivedStatus(derived)
+                        if (!TaskKind.isSimpleTask(result.task)) {
+                            val derived = deriveStatusFromSteps(roadmapSteps)
+                            if (derived != savedStatus) {
+                                persistDerivedStatus(derived)
+                            }
                         }
                     }
                 }
@@ -416,6 +454,7 @@ class TaskDetailActivity : AppCompatActivity() {
         val today = LocalDate.now()
         val tasksBefore = activeTasksSnapshot
         val hadOverdueBefore = TodayPlanWork.hasIncompleteOverdueSteps(tasksBefore, today)
+        estimateFeedbackAnsweredStepIndices.remove(index)
         roadmapSteps[index] = cur.copy(
             completed = checked,
             completedAt = if (checked) Instant.now().toString() else null,
@@ -452,6 +491,47 @@ class TaskDetailActivity : AppCompatActivity() {
 
         if (derived != savedStatus) {
             persistDerivedStatus(derived)
+        }
+    }
+
+    private fun onRoadmapEstimateFeedbackSelected(index: Int, feedback: String) {
+        if (roadmapPatchInFlight) return
+        val normalized = EstimateFeedback.normalize(feedback) ?: return
+        if (index !in roadmapSteps.indices) return
+        if (index in estimateFeedbackAnsweredStepIndices) return
+        val step = roadmapSteps[index]
+        if (!step.completed) return
+
+        val token = SessionManager.getAccessToken(this) ?: return
+        val userId = achievementsUserId ?: SupabaseUserId.resolveUserId(token) ?: return
+        val task = currentTaskRow ?: return
+
+        estimateFeedbackAnsweredStepIndices.add(index)
+        roadmapAdapter.submitList(roadmapSteps.toList())
+
+        networkExecutor.execute {
+            when (
+                val result = SupabaseRoadmapStepEstimateFeedbackApi.upsert(
+                    accessToken = token,
+                    userId = userId,
+                    task = task,
+                    stepIndex = index,
+                    step = step,
+                    feedback = normalized,
+                )
+            ) {
+                is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Failure -> runOnUiThread {
+                    estimateFeedbackAnsweredStepIndices.remove(index)
+                    if (isFinishing) return@runOnUiThread
+                    roadmapAdapter.submitList(roadmapSteps.toList())
+                    Toast.makeText(
+                        this,
+                        getString(R.string.roadmap_estimate_feedback_save_failed) + "\n" + result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+                is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Success -> Unit
+            }
         }
     }
 

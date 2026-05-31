@@ -56,6 +56,9 @@ object SupabaseEdgeFunctionsApi {
             payload.put("userEstimatedHours", JSONObject.NULL)
         }
 
+        val estimateFeedbackHistory = loadEstimateFeedbackHistory(accessToken)
+        payload.put("estimateFeedbackHistory", estimateFeedbackHistory)
+
         val base = BuildConfig.SUPABASE_URL.trimEnd('/')
         val primary = callRoadmapFunction(base, PRIMARY_ROADMAP_FUNCTION_SLUG, accessToken, payload)
         if (primary is RoadmapResult.Failure && primary.message.contains("HTTP 404", ignoreCase = true)) {
@@ -69,6 +72,19 @@ object SupabaseEdgeFunctionsApi {
             }
         }
         return primary
+    }
+
+    private fun loadEstimateFeedbackHistory(accessToken: String): JSONArray {
+        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return JSONArray()
+        return when (
+            val result = SupabaseRoadmapStepEstimateFeedbackApi.listRecentHistory(accessToken, userId, limit = 50)
+        ) {
+            is SupabaseRoadmapStepEstimateFeedbackApi.HistoryResult.Success -> result.records
+            is SupabaseRoadmapStepEstimateFeedbackApi.HistoryResult.Failure -> {
+                Log.w("SupabaseEdgeFunctionsApi", "Could not load estimate feedback history: ${result.message}")
+                JSONArray()
+            }
+        }
     }
 
     private fun callRoadmapFunction(
