@@ -217,6 +217,35 @@ class MainActivity : AppCompatActivity() {
                     ?.use { it.readText() }
                     .orEmpty()
 
+                if (!school.isNullOrBlank() || !yearInSchool.isNullOrBlank()) {
+                    SignupProfilePending.save(applicationContext, school, yearInSchool)
+                }
+
+                var sessionForUi: Triple<String, String, Long?>? = null
+                if (responseCode in 200..299) {
+                    val root = JSONObject(responseBody)
+                    val envelope = root.optJSONObject("data") ?: root
+                    val user = resolveSignupUserObject(envelope)
+                    val identities = user?.optJSONArray("identities")
+                    if (user != null && identities != null && identities.length() == 0) {
+                        runOnUiThread {
+                            signUpRequestInFlight = false
+                            signUpButton.isEnabled = true
+                            statusText.showAuthMessage(
+                                getString(R.string.status_signup_existing_account),
+                                AuthMessageTone.ERROR,
+                            )
+                        }
+                        return@execute
+                    }
+
+                    val (accessToken, refreshToken, expiresIn) = extractSessionFromSignupEnvelope(envelope)
+                    if (accessToken.isNotBlank()) {
+                        SignupProfilePending.flushBlocking(applicationContext, accessToken)
+                        sessionForUi = Triple(accessToken, refreshToken, expiresIn)
+                    }
+                }
+
                 runOnUiThread {
                     signUpRequestInFlight = false
                     signUpButton.isEnabled = true
@@ -224,21 +253,9 @@ class MainActivity : AppCompatActivity() {
                         val root = JSONObject(responseBody)
                         val envelope = root.optJSONObject("data") ?: root
 
-                        val user = resolveSignupUserObject(envelope)
-                        val identities = user?.optJSONArray("identities")
-                        if (user != null && identities != null && identities.length() == 0) {
-                            statusText.showAuthMessage(
-                                getString(R.string.status_signup_existing_account),
-                                AuthMessageTone.ERROR
-                            )
-                            return@runOnUiThread
-                        }
-
-                        val (accessToken, refreshToken, expiresIn) = extractSessionFromSignupEnvelope(envelope)
-                        if (accessToken.isNotBlank()) {
+                        sessionForUi?.let { (accessToken, refreshToken, expiresIn) ->
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
                             FcmTokenRegistrar.syncIfLoggedIn(this)
-                            saveSignupProfileFields(accessToken, school, yearInSchool)
                             val intent = Intent(this, HomeActivity::class.java)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                             startActivity(intent)
@@ -270,18 +287,6 @@ class MainActivity : AppCompatActivity() {
                     statusText.showAuthMessage(getString(R.string.status_network_error), AuthMessageTone.ERROR)
                 }
             }
-        }
-    }
-
-    private fun saveSignupProfileFields(
-        accessToken: String,
-        school: String?,
-        yearInSchool: String?,
-    ) {
-        if (school.isNullOrBlank() && yearInSchool.isNullOrBlank()) return
-        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return
-        networkExecutor.execute {
-            SupabaseProfilesApi.upsertAccountFields(accessToken, userId, school, yearInSchool)
         }
     }
 
@@ -361,11 +366,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun authErrorCodeFromBody(responseBody: String): String {
+        return try {
+            val obj = JSONObject(responseBody)
+            obj.optString("error_code")
+                .ifBlank { obj.optJSONObject("error")?.optString("error_code").orEmpty() }
+                .trim()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     /** Friendly copy plus raw Supabase text so deliverability / SMTP issues are visible. */
     private fun signupErrorDisplay(responseBody: String, responseCode: Int): String {
         val technical = combinedAuthErrorText(responseBody).trim()
             .ifBlank { responseBody.trim().take(800) }
-        val friendly = cleanSignUpError(technical, responseCode)
+        val friendly = cleanSignUpError(technical, responseCode, authErrorCodeFromBody(responseBody))
         val httpPart = if (responseCode in 400..599) "\n(HTTP $responseCode)" else ""
         val techLower = technical.lowercase()
         val friendlyLower = friendly.lowercase()
@@ -380,8 +396,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun cleanSignUpError(raw: String, httpStatus: Int = 0): String {
+    private fun cleanSignUpError(raw: String, httpStatus: Int = 0, errorCode: String = ""): String {
         val msg = raw.lowercase()
+        val code = errorCode.lowercase()
         return when {
             msg.contains("already registered") ||
                 msg.contains("already been registered") ||
@@ -393,6 +410,9 @@ class MainActivity : AppCompatActivity() {
                 msg.contains("email_exists") -> {
                 getString(R.string.status_signup_existing_account)
             }
+            isSignupConfirmationBlocked(msg, httpStatus, code) -> {
+                getString(R.string.status_signup_confirmation_blocked)
+            }
             isConfirmationEmailSendFailure(msg, httpStatus) -> {
                 getString(R.string.status_signup_email_not_deliverable)
             }
@@ -403,6 +423,19 @@ class MainActivity : AppCompatActivity() {
             msg.isBlank() || msg == "unknown error" -> getString(R.string.status_generic_error)
             else -> raw
         }
+    }
+
+    /**
+     * Supabase often returns 400 "Email address … is invalid" when confirmation mail
+     * cannot be sent (default SMTP / authorized-address limits), not because the format is wrong.
+     */
+    private fun isSignupConfirmationBlocked(msg: String, httpStatus: Int, errorCode: String): Boolean {
+        if (errorCode == "email_address_not_authorized" || errorCode == "email_address_invalid") {
+            return true
+        }
+        if (msg.contains("not authorized") && msg.contains("email")) return true
+        if (httpStatus == 400 && msg.contains("email address") && msg.contains("is invalid")) return true
+        return false
     }
 
     private fun isConfirmationEmailSendFailure(msg: String, httpStatus: Int): Boolean {

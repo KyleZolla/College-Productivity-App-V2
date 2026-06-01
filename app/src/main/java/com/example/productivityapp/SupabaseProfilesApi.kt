@@ -162,10 +162,13 @@ object SupabaseProfilesApi {
             connection.readTimeout = 20000
             connection.doOutput = true
 
-            val payload = JSONObject()
-                .put("id", userId)
+            val accountFields = JSONObject()
                 .put("school", school?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
                 .put("yearInSchool", yearInSchool?.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+            val payload = JSONObject()
+                .put("id", userId)
+                .put("school", accountFields.get("school"))
+                .put("yearInSchool", accountFields.get("yearInSchool"))
             val body = payload.toString().toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }
@@ -178,6 +181,13 @@ object SupabaseProfilesApi {
 
             if (responseCode in 200..299) {
                 PatchResult.Success
+            } else if (responseCode == 409) {
+                val idEncoded = URLEncoder.encode(userId, StandardCharsets.UTF_8.name())
+                when (patchProfilesById(accessToken, idEncoded, accountFields)) {
+                    is PatchAttemptResult.Updated -> PatchResult.Success
+                    is PatchAttemptResult.NoRowUpdated -> PatchResult.Failure(parseError(responseBody, responseCode))
+                    is PatchAttemptResult.Error -> PatchResult.Failure(parseError(responseBody, responseCode))
+                }
             } else {
                 PatchResult.Failure(parseError(responseBody, responseCode))
             }

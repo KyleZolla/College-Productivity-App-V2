@@ -134,12 +134,19 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeGetAheadGroups: LinearLayout
     private lateinit var homeGetAheadCompletedReviewHost: LinearLayout
     private lateinit var homeUpcomingLoading: ProgressBar
+    private lateinit var homeWeekAheadSection: LinearLayout
+    private lateinit var homeWeekAheadCard: MaterialCardView
+    private lateinit var homeWeekAheadSummaryLine: TextView
+    private lateinit var homeWeekAheadBusiestLine: TextView
+    private lateinit var homeWeekAheadNextLine: TextView
+    private lateinit var homeWeekAheadExpandedHost: LinearLayout
 
     private var homeTasksSnapshot: List<SupabaseTasksApi.TaskRow> = emptyList()
     /** Task ids currently shown in Coming up; stable until a task fully completes or data reloads. */
     private var homeUpcomingDisplayedIds: List<String> = emptyList()
     private var homeRoadmapPatchInFlight = false
     private var homeTodayPlanExpanded = false
+    private var homeWeekAheadExpanded = false
     private val homeCompletedReviewDaysExpanded = mutableSetOf<String>()
     private val homeTodayPlanPinnedCheckedKeys = mutableSetOf<String>()
     private val homeGetAheadPinnedCheckedKeys = mutableSetOf<String>()
@@ -282,6 +289,16 @@ class HomeActivity : AppCompatActivity() {
         homeGetAheadGroups = findViewById(R.id.homeGetAheadGroups)
         homeGetAheadCompletedReviewHost = findViewById(R.id.homeGetAheadCompletedReviewHost)
         homeUpcomingLoading = findViewById(R.id.homeUpcomingLoading)
+        homeWeekAheadSection = findViewById(R.id.homeWeekAheadSection)
+        homeWeekAheadCard = findViewById(R.id.homeWeekAheadCard)
+        homeWeekAheadSummaryLine = findViewById(R.id.homeWeekAheadSummaryLine)
+        homeWeekAheadBusiestLine = findViewById(R.id.homeWeekAheadBusiestLine)
+        homeWeekAheadNextLine = findViewById(R.id.homeWeekAheadNextLine)
+        homeWeekAheadExpandedHost = findViewById(R.id.homeWeekAheadExpandedHost)
+        homeWeekAheadCard.setOnClickListener {
+            homeWeekAheadExpanded = !homeWeekAheadExpanded
+            bindWeekAheadSection(homeTasksSnapshot.filter { it.status != TaskStatus.COMPLETE })
+        }
         homeUpcomingEmpty = findViewById(R.id.homeUpcomingEmpty)
         homeUpcomingCards = findViewById(R.id.homeUpcomingCards)
         homeViewAllTasks = findViewById(R.id.homeViewAllTasks)
@@ -475,6 +492,7 @@ class HomeActivity : AppCompatActivity() {
         if (userId.isNullOrBlank()) return
 
         networkExecutor.execute {
+            SignupProfilePending.flushBlocking(applicationContext, token)
             when (val result = SupabaseProfilesApi.get(token, userId)) {
                 is SupabaseProfilesApi.GetResult.Success -> runOnUiThread {
                     if (isFinishing) return@runOnUiThread
@@ -675,6 +693,7 @@ class HomeActivity : AppCompatActivity() {
             homeUpcomingCards.removeAllViews()
             homeUpcomingCards.visibility = View.GONE
             homeTodayPlanSection.visibility = View.GONE
+            homeWeekAheadSection.visibility = View.GONE
             homeOverdueRecoveryCard.visibility = View.GONE
             homeUpcomingEmpty.text = getString(R.string.error_task_not_signed_in)
             homeUpcomingEmpty.visibility = View.VISIBLE
@@ -686,6 +705,7 @@ class HomeActivity : AppCompatActivity() {
             homeUpcomingEmpty.visibility = View.GONE
             homeUpcomingCards.visibility = View.GONE
             homeTodayPlanSection.visibility = View.GONE
+            homeWeekAheadSection.visibility = View.GONE
             homeOverdueRecoveryCard.visibility = View.GONE
         }
 
@@ -735,6 +755,7 @@ class HomeActivity : AppCompatActivity() {
                     if (showLoading) homeUpcomingLoading.visibility = View.GONE
                     if (showLoading) {
                         homeTodayPlanSection.visibility = View.GONE
+                        homeWeekAheadSection.visibility = View.GONE
                         homeUpcomingCards.removeAllViews()
                         homeUpcomingCards.visibility = View.GONE
                         homeUpcomingEmpty.text =
@@ -2156,6 +2177,103 @@ class HomeActivity : AppCompatActivity() {
             homeTodayPlanCompletedByDayHost.removeAllViews()
         }
         maybeReshowOverdueRecoveryUndoSnackbar()
+        bindWeekAheadSection(allActiveTasks.filter { it.status != TaskStatus.COMPLETE })
+    }
+
+    private fun bindWeekAheadSection(activeTasks: List<SupabaseTasksApi.TaskRow>) {
+        homeWeekAheadSection.visibility = View.VISIBLE
+        val today = LocalDate.now()
+        val summary = WeekAheadWork.computeSummary(activeTasks, today)
+        val tasksDuePhrase = resources.getQuantityString(
+            R.plurals.home_week_ahead_tasks_due,
+            summary.tasksDueCount,
+            summary.tasksDueCount,
+        )
+        homeWeekAheadSummaryLine.text = getString(
+            R.string.home_week_ahead_summary,
+            tasksDuePhrase,
+            WeekAheadWork.formatPlannedHours(summary.totalPlannedHours),
+        )
+        homeWeekAheadBusiestLine.text = if (summary.busiestDayHours > 0.0 && summary.busiestDay != null) {
+            val dayName = summary.busiestDay.dayOfWeek.getDisplayName(
+                java.time.format.TextStyle.FULL,
+                Locale.getDefault(),
+            )
+            getString(
+                R.string.home_week_ahead_busiest_day,
+                dayName,
+                WeekAheadWork.formatPlannedHours(summary.busiestDayHours),
+            )
+        } else {
+            getString(R.string.home_week_ahead_no_roadmap_hours)
+        }
+        val nextTask = summary.nextDueTask
+        homeWeekAheadNextLine.text = if (nextTask?.dueDate != null) {
+            getString(
+                R.string.home_week_ahead_next_up,
+                nextTask.title,
+                WeekAheadWork.dueDayLabel(nextTask.dueDate, today),
+            )
+        } else {
+            getString(R.string.home_week_ahead_no_tasks_due)
+        }
+        if (homeWeekAheadExpanded) {
+            homeWeekAheadExpandedHost.visibility = View.VISIBLE
+            bindWeekAheadExpandedDays(summary.dayBreakdowns, today)
+        } else {
+            homeWeekAheadExpandedHost.visibility = View.GONE
+            homeWeekAheadExpandedHost.removeAllViews()
+        }
+    }
+
+    private fun bindWeekAheadExpandedDays(
+        breakdowns: List<WeekAheadDayBreakdown>,
+        today: LocalDate,
+    ) {
+        homeWeekAheadExpandedHost.removeAllViews()
+        val inflater = LayoutInflater.from(this)
+        for (day in breakdowns) {
+            val block = inflater.inflate(R.layout.item_home_week_ahead_day, homeWeekAheadExpandedHost, false)
+            val title = block.findViewById<TextView>(R.id.homeWeekAheadDayTitle)
+            title.text = if (day.date == today) {
+                getString(R.string.home_week_ahead_day_today)
+            } else {
+                day.date.dayOfWeek.getDisplayName(
+                    java.time.format.TextStyle.FULL,
+                    Locale.getDefault(),
+                )
+            }
+            val hoursLine = block.findViewById<TextView>(R.id.homeWeekAheadDayHours)
+            hoursLine.text = if (day.plannedHours > 0.0) {
+                getString(
+                    R.string.home_week_ahead_day_hours,
+                    WeekAheadWork.formatPlannedHours(day.plannedHours),
+                )
+            } else {
+                getString(R.string.home_week_ahead_day_no_hours)
+            }
+            val tasksHost = block.findViewById<LinearLayout>(R.id.homeWeekAheadDayTasksHost)
+            if (day.tasksDue.isEmpty()) {
+                val line = inflater.inflate(
+                    R.layout.item_home_week_ahead_task_line,
+                    tasksHost,
+                    false,
+                ) as TextView
+                line.text = getString(R.string.home_week_ahead_day_no_tasks)
+                tasksHost.addView(line)
+            } else {
+                for (task in day.tasksDue) {
+                    val line = inflater.inflate(
+                        R.layout.item_home_week_ahead_task_line,
+                        tasksHost,
+                        false,
+                    ) as TextView
+                    line.text = getString(R.string.home_week_ahead_day_task_due, task.title)
+                    tasksHost.addView(line)
+                }
+            }
+            homeWeekAheadExpandedHost.addView(block)
+        }
     }
 
     private fun onSimpleTodayPlanToggled(taskId: String, checked: Boolean) {

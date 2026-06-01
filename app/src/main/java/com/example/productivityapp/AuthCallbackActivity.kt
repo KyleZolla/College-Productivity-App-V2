@@ -3,8 +3,11 @@ package com.example.productivityapp
 import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import java.util.concurrent.Executors
 
 class AuthCallbackActivity : AppCompatActivity() {
+
+    private val networkExecutor = Executors.newSingleThreadExecutor()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -22,11 +25,26 @@ class AuthCallbackActivity : AppCompatActivity() {
 
         if (!accessToken.isNullOrBlank()) {
             val expiresIn = fragmentParams["expires_in"]?.toLongOrNull()
-            SessionManager.saveSession(this, accessToken, refreshToken.orEmpty(), expiresIn)
-            FcmTokenRegistrar.syncIfLoggedIn(this)
+            val token = accessToken
+            val refresh = refreshToken.orEmpty()
+            networkExecutor.execute {
+                SignupProfilePending.flushBlocking(applicationContext, token)
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    SessionManager.saveSession(this, token, refresh, expiresIn)
+                    FcmTokenRegistrar.syncIfLoggedIn(this)
+                    startActivity(
+                        Intent(this, HomeActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        },
+                    )
+                    finish()
+                }
+            }
+            return
         }
 
-        val destination = if (!accessToken.isNullOrBlank() || !authCode.isNullOrBlank()) {
+        val destination = if (!authCode.isNullOrBlank()) {
             Intent(this, HomeActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
             }
@@ -38,5 +56,10 @@ class AuthCallbackActivity : AppCompatActivity() {
         }
         startActivity(destination)
         finish()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        networkExecutor.shutdownNow()
     }
 }

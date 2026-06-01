@@ -28,6 +28,7 @@
     <string name="status_after_signup_confirm">Check your email to confirm, then log in here.</string>
     <string name="status_signup_existing_account">An account already exists with that email.</string>
     <string name="status_signup_email_not_deliverable">We couldn\'t send a confirmation email to this address. Check that it\'s correct and still in use, or try a different email.</string>
+    <string name="status_signup_confirmation_blocked">Sign-up needs a confirmation email, but your Supabase project cannot send mail to this address yet (the server may report it as \"invalid\" even when the email is fine). In Supabase Dashboard: Authentication → Emails → set up custom SMTP, or under Providers → Email turn off Confirm email. If you already signed up, try Log in or remove the user in Authentication → Users.</string>
     <string name="status_signup_no_confirmation">Sign-up could not be confirmed. Please try again.</string>
     <string name="status_login_working">Logging in...</string>
     <string name="status_login_success">Login succeeded.</string>
@@ -48,6 +49,21 @@
     <string name="status_empty"></string>
     <string name="home_title">Home</string>
     <string name="home_coming_up_label">Coming up</string>
+    <string name="home_week_ahead_title">Week ahead</string>
+    <plurals name="home_week_ahead_tasks_due">
+        <item quantity="one">%d task due</item>
+        <item quantity="other">%d tasks due</item>
+    </plurals>
+    <string name="home_week_ahead_summary">%1$s · %2$s hours planned</string>
+    <string name="home_week_ahead_busiest_day">Busiest day: %1$s with %2$s hours</string>
+    <string name="home_week_ahead_no_roadmap_hours">No roadmap steps planned this week</string>
+    <string name="home_week_ahead_next_up">Next up: %1$s due %2$s</string>
+    <string name="home_week_ahead_no_tasks_due">No tasks due this week</string>
+    <string name="home_week_ahead_day_hours">%1$s hours planned</string>
+    <string name="home_week_ahead_day_no_hours">No hours planned</string>
+    <string name="home_week_ahead_day_no_tasks">No tasks due</string>
+    <string name="home_week_ahead_day_task_due">%1$s due</string>
+    <string name="home_week_ahead_day_today">Today</string>
     <string name="home_overdue_recovery_title">You have unfinished steps from earlier</string>
     <string name="home_overdue_recovery_subtitle_generic">You have %1$d unfinished step(s) from before today. Want to update your plan?</string>
     <string name="home_overdue_recovery_subtitle_single_task">You have %1$d unfinished step(s) from %2$s. Want to update your plan?</string>

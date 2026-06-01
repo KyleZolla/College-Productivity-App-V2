@@ -125,14 +125,22 @@ class LoginActivity : AppCompatActivity() {
                     ?.use { it.readText() }
                     .orEmpty()
 
+                var sessionForUi: Triple<String, String, Long?>? = null
+                if (responseCode in 200..299) {
+                    val payload = JSONObject(responseBody)
+                    val accessToken = payload.optString("access_token")
+                    val refreshToken = payload.optString("refresh_token")
+                    val expiresIn = if (payload.has("expires_in")) payload.optLong("expires_in") else null
+                    if (accessToken.isNotBlank()) {
+                        SignupProfilePending.flushBlocking(applicationContext, accessToken)
+                        sessionForUi = Triple(accessToken, refreshToken, expiresIn)
+                    }
+                }
+
                 runOnUiThread {
                     logInButton.isEnabled = true
                     if (responseCode in 200..299) {
-                        val payload = JSONObject(responseBody)
-                        val accessToken = payload.optString("access_token")
-                        val refreshToken = payload.optString("refresh_token")
-                        val expiresIn = if (payload.has("expires_in")) payload.optLong("expires_in") else null
-                        if (accessToken.isNotBlank()) {
+                        sessionForUi?.let { (accessToken, refreshToken, expiresIn) ->
                             SessionManager.saveSession(this, accessToken, refreshToken, expiresIn)
                             FcmTokenRegistrar.syncIfLoggedIn(this)
                         }
