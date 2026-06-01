@@ -2645,6 +2645,8 @@ class HomeActivity : AppCompatActivity() {
         val duePill = root.findViewById<TextView>(R.id.homeCardDuePill)
         val statusLine = root.findViewById<TextView>(R.id.homeCardStatus)
         val courseLine = root.findViewById<TextView>(R.id.homeCardCourse)
+        val metaLine = root.findViewById<TextView>(R.id.homeCardMeta)
+        val nextStepLine = root.findViewById<TextView>(R.id.homeCardNextStep)
         val progress = root.findViewById<ProgressBar>(R.id.homeCardProgress)
 
         val overdue = DueDateHumanLabel.isOverdue(task.dueDate, task.status)
@@ -2665,6 +2667,10 @@ class HomeActivity : AppCompatActivity() {
             courseLine.visibility = View.VISIBLE
             courseLine.text = courseLabel
         }
+
+        val upcomingDetails = buildUpcomingTaskDetails(task)
+        metaLine.text = upcomingDetails.meta
+        nextStepLine.text = upcomingDetails.nextStep
 
         val summary = RoadmapProgress.summarize(task.roadmap)
         if (summary.total <= 0) {
@@ -2702,6 +2708,57 @@ class HomeActivity : AppCompatActivity() {
                     MaterialColors.getColor(duePill, com.google.android.material.R.attr.colorOnSurfaceVariant)
                 )
             }
+        }
+    }
+
+    private data class UpcomingTaskDetails(val meta: String, val nextStep: String)
+
+    private fun buildUpcomingTaskDetails(task: SupabaseTasksApi.TaskRow): UpcomingTaskDetails {
+        val steps = RoadmapStep.parseList(task.roadmap)
+        return if (steps.isEmpty()) {
+            val stepsLeftLabel = resources.getQuantityString(R.plurals.home_upcoming_steps_left, 1, 1)
+            val timeLabel = formatUpcomingRemainingTime(TodayPlanWork.SIMPLE_TASK_HOURS)
+            UpcomingTaskDetails(
+                meta = getString(R.string.home_upcoming_meta, stepsLeftLabel, timeLabel),
+                nextStep = getString(
+                    R.string.home_upcoming_next_step,
+                    getString(R.string.task_detail_mark_complete),
+                ),
+            )
+        } else {
+            val remaining = steps.filter { !it.completed }
+            val stepsLeft = remaining.size.coerceAtLeast(1)
+            val stepsLeftLabel = resources.getQuantityString(
+                R.plurals.home_upcoming_steps_left,
+                stepsLeft,
+                stepsLeft,
+            )
+            val remainingHours = remaining.sumOf { step ->
+                step.estimatedHours?.takeIf { !it.isNaN() && it > 0.0 }
+                    ?: TodayPlanWork.SIMPLE_TASK_HOURS
+            }
+            val nextTitle = remaining.firstOrNull()?.title?.trim().orEmpty()
+                .ifBlank { getString(R.string.task_detail_mark_complete) }
+            UpcomingTaskDetails(
+                meta = getString(
+                    R.string.home_upcoming_meta,
+                    stepsLeftLabel,
+                    formatUpcomingRemainingTime(remainingHours),
+                ),
+                nextStep = getString(R.string.home_upcoming_next_step, nextTitle),
+            )
+        }
+    }
+
+    private fun formatUpcomingRemainingTime(hours: Double): String {
+        return when {
+            hours <= 0.0 -> getString(R.string.home_upcoming_time_remaining_unknown)
+            hours < 1.0 / 60.0 -> getString(R.string.home_upcoming_time_remaining_minutes, 1)
+            hours < 1.0 -> getString(
+                R.string.home_upcoming_time_remaining_minutes,
+                (hours * 60.0).roundToInt().coerceAtLeast(1),
+            )
+            else -> getString(R.string.home_upcoming_time_remaining_hours, hours)
         }
     }
 

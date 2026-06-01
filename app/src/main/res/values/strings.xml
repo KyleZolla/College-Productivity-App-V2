@@ -114,6 +114,15 @@
     <string name="home_greet_afternoon">Good afternoon, %1$s 👋</string>
     <string name="home_greet_evening">Good evening, %1$s 👋</string>
     <string name="home_greet_late">Hey, %1$s 👋</string>
+    <plurals name="home_upcoming_steps_left">
+        <item quantity="one">%d step left</item>
+        <item quantity="other">%d steps left</item>
+    </plurals>
+    <string name="home_upcoming_meta">%1$s · %2$s</string>
+    <string name="home_upcoming_next_step">Next: %1$s</string>
+    <string name="home_upcoming_time_remaining_minutes">~%1$d min left</string>
+    <string name="home_upcoming_time_remaining_hours">~%1$.1f hr left</string>
+    <string name="home_upcoming_time_remaining_unknown">Time TBD</string>
     <string name="home_empty_upcoming">No upcoming tasks. Tap + to add one.</string>
     <string name="home_view_all_tasks">View all tasks →</string>
     <string name="home_upcoming_load_failed">Couldn\'t load upcoming tasks.</string>

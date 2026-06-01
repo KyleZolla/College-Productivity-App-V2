@@ -71,6 +71,28 @@
             tools:text="Introduction to Psychology (200)"
             tools:visibility="visible" />
 
+        <TextView
+            android:id="@+id/homeCardMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            tools:text="3 steps left · ~2.5 hr left" />
+
+        <TextView
+            android:id="@+id/homeCardNextStep"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="?attr/colorOnSurface"
+            tools:text="Next: Draft outline" />
+
         <ProgressBar
             android:id="@+id/homeCardProgress"
             style="?android:attr/progressBarStyleHorizontal"
