@@ -99,4 +99,21 @@ class TodayPlanAdjustmentTest {
         assertFalse(plan.fitsAvailableTime)
         assertTrue(plan.recommendedFocus.isEmpty())
     }
+
+    @Test
+    fun buildApplyUpdates_emptyWhenDueTodayOverBudgetCannotMove() {
+        val entry = complexEntry(hours = 2.5).copy(
+            task = SupabaseTasksApi.TaskRow(
+                id = "due-today",
+                title = "Due today",
+                dueDate = LocalDateTime.of(today, LocalTime.NOON),
+                status = TaskStatus.NOT_STARTED,
+                roadmap = null,
+            ),
+        )
+        val plan = TodayPlanAdjustment.computePlan(listOf(entry), availableHours = 2.0, today = today)
+        assertFalse(plan.fitsAvailableTime)
+        assertTrue(TodayPlanAdjustment.buildApplyUpdates(plan, today).isEmpty())
+        assertTrue(TodayPlanAdjustment.captureOriginalDates(plan.moveLater).isEmpty())
+    }
 }

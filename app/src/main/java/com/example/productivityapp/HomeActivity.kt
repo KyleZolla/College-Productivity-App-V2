@@ -2024,14 +2024,15 @@ class HomeActivity : AppCompatActivity() {
         if (homeRoadmapPatchInFlight) return
         val plan = todayPlanAdjustmentCachedPlan ?: return
         if (plan.fitsAvailableTime) return
-        val token = SessionManager.getAccessToken(this) ?: return
         val today = LocalDate.now()
         val updates = TodayPlanAdjustment.buildApplyUpdates(plan, today)
-        if (updates.isEmpty() && plan.blockedOnToday.isEmpty()) return
-
         val undoSnapshot = TodayPlanAdjustment.captureOriginalDates(plan.moveLater)
-        if (undoSnapshot.isEmpty() && updates.isEmpty()) return
+        if (updates.isEmpty() && undoSnapshot.isEmpty()) {
+            acknowledgeTodayPlanAdjustment()
+            return
+        }
 
+        val token = SessionManager.getAccessToken(this) ?: return
         val opGen = ++todayPlanAdjustmentOperationGeneration
         todayPlanAdjustmentUndoSnapshot = undoSnapshot
         todayPlanAdjustmentDismissed = true
@@ -2076,6 +2077,18 @@ class HomeActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun acknowledgeTodayPlanAdjustment() {
+        todayPlanAdjustmentDismissed = true
+        bindHomeTodayPlan(homeTasksSnapshot)
+        Snackbar.make(
+            homeRoot,
+            getString(R.string.home_today_plan_adjustment_acknowledged),
+            Snackbar.LENGTH_SHORT,
+        )
+            .setAnchorView(findViewById(R.id.bottomNavBar))
+            .show()
     }
 
     private fun showTodayPlanAdjustmentUndoSnackbar() {

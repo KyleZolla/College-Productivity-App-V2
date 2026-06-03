@@ -125,6 +125,7 @@
     <string name="home_today_plan_adjustment_keep_original">Keep original</string>
     <string name="home_today_plan_adjustment_apply">Apply plan</string>
     <string name="home_today_plan_adjustment_applied">Updated today\u2019s plan.</string>
+    <string name="home_today_plan_adjustment_acknowledged">Today\u2019s plan accepted.</string>
     <string name="home_today_plan_adjustment_failed">Couldn\u2019t update today\u2019s plan.\n%1$s</string>
     <string name="home_greet_morning">Good morning, %1$s 👋</string>
     <string name="home_greet_afternoon">Good afternoon, %1$s 👋</string>
