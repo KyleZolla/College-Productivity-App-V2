@@ -201,6 +201,8 @@ class HomeActivity : AppCompatActivity() {
     private var homeUpcomingDisplayedIds: List<String> = emptyList()
     private var homeRoadmapPatchInFlight = false
     private var homeTodayPlanExpanded = false
+    /** Tracks all-done state so we can reset collapsed pins when new work lands on today. */
+    private var wasTodayWorkPlanComplete = false
     private var homeWeekAheadExpanded = false
     private val homeCompletedReviewDaysExpanded = mutableSetOf<String>()
     private val homeTodayPlanPinnedCheckedKeys = mutableSetOf<String>()
@@ -1025,6 +1027,7 @@ class HomeActivity : AppCompatActivity() {
         today: LocalDate,
         getAheadVisible: Boolean,
         focusDay: LocalDate?,
+        todayWorkPlanComplete: Boolean,
     ) {
         homeTodayPlanCompletedTodayHost.removeAllViews()
         homeTodayPlanFutureReviewBeforeFocusHost.removeAllViews()
@@ -1093,7 +1096,7 @@ class HomeActivity : AppCompatActivity() {
             }
             when {
                 partiallyDoneFutureDay -> allDoneBanner.visibility = View.GONE
-                day == today && list.isNotEmpty() -> {
+                day == today && list.isNotEmpty() && todayWorkPlanComplete -> {
                     allDoneBanner.visibility = View.VISIBLE
                     allDoneBanner.text = getString(R.string.home_today_plan_all_done_banner_today)
                 }
@@ -1158,14 +1161,6 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    private fun isPlanEntryCompletedToday(entry: TodayPlanEntry, today: LocalDate): Boolean {
-        val zone = ZoneId.systemDefault()
-        return when {
-            entry.isSimple -> TodayPlanWork.wasTaskCompletedToday(entry.task, today, zone)
-            else -> TodayPlanWork.wasCompletedToday(entry.step!!, today, zone)
-        }
-    }
-
     private fun buildCollapsedVisibleEntries(
         workEntries: List<TodayPlanEntry>,
         scopeEntries: List<TodayPlanEntry>,
@@ -1182,10 +1177,7 @@ class HomeActivity : AppCompatActivity() {
                     out.add(entry)
                     uncheckedShown++
                 }
-                entry.isCompleted && (
-                    todayPlanEntryKey(entry) in pinnedKeys ||
-                        isPlanEntryCompletedToday(entry, today)
-                    ) -> out.add(entry)
+                entry.isCompleted && todayPlanEntryKey(entry) in pinnedKeys -> out.add(entry)
             }
         }
         return out.sortedWith(compareBy({ !it.isSimple }, { sorted.indexOfFirst { e -> todayPlanEntryKey(e) == todayPlanEntryKey(it) } }))
@@ -2171,6 +2163,13 @@ class HomeActivity : AppCompatActivity() {
         val reviewTodayEntries = todayPlanCompletedReviewEntries(allActiveTasks, today)
         val futureEntries = collectFuturePlanEntries(allActiveTasks, today)
 
+        if (hasIncomplete && wasTodayWorkPlanComplete) {
+            homeTodayPlanPinnedCheckedKeys.clear()
+            homeTodayPlanExpanded = false
+            homeCompletedReviewDaysExpanded.remove(today.toString())
+        }
+        wasTodayWorkPlanComplete = todayPlanComplete
+
         if (progressEntries.isEmpty() || !hasIncomplete) {
             homeTodayPlanProgressBlock.visibility = View.GONE
         } else {
@@ -2233,6 +2232,7 @@ class HomeActivity : AppCompatActivity() {
             today = today,
             getAheadVisible = getAheadVisible,
             focusDay = homeGetAheadFocusDate,
+            todayWorkPlanComplete = todayPlanComplete,
         )
         if (getAheadVisible && homeGetAheadFocusDate != null) {
             val focusEntries = futureEntries.filter { it.recommendedOn == homeGetAheadFocusDate }
