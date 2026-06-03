@@ -33,13 +33,21 @@ object TodayPlanAdjustment {
     fun incompleteComplexEntries(workEntries: List<TodayPlanEntry>): List<TodayPlanEntry> =
         workEntries.filter { !it.isSimple && !it.isCompleted }
 
+    fun incompleteSimpleEntries(workEntries: List<TodayPlanEntry>): List<TodayPlanEntry> =
+        workEntries.filter { it.isSimple && !it.isCompleted }
+
+    /** Sum of estimated hours for all incomplete work (roadmap steps and simple tasks). */
+    fun plannedHoursForIncomplete(workEntries: List<TodayPlanEntry>): Double =
+        workEntries.filter { !it.isCompleted }.sumOf { stepHours(it) }
+
     fun computePlan(
         workEntries: List<TodayPlanEntry>,
         availableHours: Double,
         today: LocalDate,
     ): Plan {
         val incomplete = incompleteComplexEntries(workEntries)
-        val plannedHours = incomplete.sumOf { stepHours(it) }
+        val simpleHours = incompleteSimpleEntries(workEntries).sumOf { stepHours(it) }
+        val plannedHours = plannedHoursForIncomplete(workEntries)
         if (incomplete.isEmpty()) {
             return Plan(
                 availableHours = availableHours,
@@ -47,7 +55,7 @@ object TodayPlanAdjustment {
                 recommendedFocus = emptyList(),
                 moveLater = emptyList(),
                 blockedOnToday = emptyList(),
-                fitsAvailableTime = true,
+                fitsAvailableTime = plannedHours <= availableHours + HOUR_EPSILON,
             )
         }
         if (plannedHours <= availableHours + HOUR_EPSILON) {
@@ -63,7 +71,7 @@ object TodayPlanAdjustment {
 
         val orderedTaskGroups = orderTaskGroups(incomplete, today)
         val focus = ArrayList<TodayPlanEntry>()
-        var usedHours = 0.0
+        var usedHours = simpleHours
 
         for (group in orderedTaskGroups) {
             for (entry in group) {

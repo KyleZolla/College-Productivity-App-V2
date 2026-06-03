@@ -1857,8 +1857,8 @@ class HomeActivity : AppCompatActivity() {
         workEntries: List<TodayPlanEntry>,
         today: LocalDate,
     ) {
-        val incompleteComplex = TodayPlanAdjustment.incompleteComplexEntries(workEntries)
-        if (incompleteComplex.isEmpty()) {
+        val hasIncompleteWork = workEntries.any { !it.isCompleted }
+        if (!hasIncompleteWork) {
             homeTodayPlanTimeLimitBlock.visibility = View.GONE
             homeTodayPlanAdjustmentCard.visibility = View.GONE
             todayPlanAdjustmentCachedPlan = null
