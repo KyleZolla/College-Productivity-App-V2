@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 
 class RoadmapStepsAdapter(
     private val onToggle: (index: Int, checked: Boolean) -> Unit,
+    private val onStepClick: (index: Int, step: RoadmapStep) -> Unit,
     private val shouldShowEstimateFeedback: (index: Int, step: RoadmapStep) -> Boolean,
     private val onEstimateFeedbackSelected: (index: Int, feedback: String) -> Unit,
 ) : RecyclerView.Adapter<RoadmapStepsAdapter.VH>() {
@@ -39,7 +40,12 @@ class RoadmapStepsAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = items[position]
         holder.title.text = item.title
-        holder.description.text = item.description
+        if (item.description.isBlank()) {
+            holder.description.visibility = View.GONE
+        } else {
+            holder.description.visibility = View.VISIBLE
+            holder.description.text = item.description
+        }
         holder.priority.text = when (item.priority) {
             RoadmapStep.Priority.HIGH -> "High"
             RoadmapStep.Priority.MEDIUM -> "Medium"
@@ -58,6 +64,10 @@ class RoadmapStepsAdapter(
             onToggle(position, isChecked)
         }
 
+        holder.card.setOnClickListener {
+            onStepClick(position, item)
+        }
+
         RoadmapEstimateFeedbackUi.bind(
             root = holder.itemView,
             showPrompt = shouldShowEstimateFeedback(position, item),
@@ -72,6 +82,7 @@ class RoadmapStepsAdapter(
     }
 
     class VH(root: View) : RecyclerView.ViewHolder(root) {
+        val card: View = root.findViewById(R.id.roadmapStepCard)
         val check: CheckBox = root.findViewById(R.id.roadmapStepCheck)
         val title: TextView = root.findViewById(R.id.roadmapStepTitle)
         val priority: TextView = root.findViewById(R.id.roadmapStepPriority)

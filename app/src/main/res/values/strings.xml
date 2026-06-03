@@ -247,6 +247,10 @@
     <string name="roadmap_estimate_feedback_about_right">About right</string>
     <string name="roadmap_estimate_feedback_too_long">Too long</string>
     <string name="roadmap_estimate_feedback_save_failed">Could not save time estimate feedback.</string>
+    <string name="roadmap_step_detail_description_label">What to do</string>
+    <string name="roadmap_step_detail_no_description">No description for this step.</string>
+    <string name="roadmap_step_detail_recommended">Recommended: %1$s</string>
+    <string name="roadmap_step_detail_completed">Completed</string>
     <string name="add_task_estimated_hours_label">How long do you think this will take? (optional)</string>
     <string name="add_task_estimated_hours_hint">Estimated hours</string>
 

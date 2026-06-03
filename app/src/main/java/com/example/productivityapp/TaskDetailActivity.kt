@@ -122,6 +122,7 @@ class TaskDetailActivity : AppCompatActivity() {
         roadmapList = findViewById(R.id.taskDetailRoadmapList)
         roadmapAdapter = RoadmapStepsAdapter(
             onToggle = { index, checked -> onRoadmapStepToggled(index, checked) },
+            onStepClick = { index, step -> showRoadmapStepDetail(step) },
             shouldShowEstimateFeedback = { index, step ->
                 step.completed && index !in estimateFeedbackAnsweredStepIndices
             },
@@ -589,6 +590,11 @@ class TaskDetailActivity : AppCompatActivity() {
 
     private fun refreshStatusLine(status: TaskStatus) {
         statusLine.text = "Status: ${status.apiValue}"
+    }
+
+    private fun showRoadmapStepDetail(step: RoadmapStep) {
+        val taskTitle = findViewById<TextView>(R.id.taskDetailName).text?.toString()
+        RoadmapStepDetailBottomSheet.show(this, step, taskTitle)
     }
 
     private fun deriveStatusFromSteps(steps: List<RoadmapStep>): TaskStatus {

@@ -1532,10 +1532,9 @@ class HomeActivity : AppCompatActivity() {
         }
         applyTodayPlanStepCompletedStyle(title, meta, check, entry.isCompleted)
         check.isEnabled = !homeRoadmapPatchInFlight
-        val stepRow = row.findViewById<View>(R.id.homeTodayPlanStepRow)
-        stepRow.isClickable = !homeRoadmapPatchInFlight
-        stepRow.background = null
-        stepRow.setOnClickListener {
+        val textColumn = row.findViewById<View>(R.id.homeTodayPlanStepTextColumn)
+        textColumn.isClickable = !homeRoadmapPatchInFlight
+        textColumn.setOnClickListener {
             if (!homeRoadmapPatchInFlight) check.performClick()
         }
         parent.addView(row)
@@ -1575,11 +1574,12 @@ class HomeActivity : AppCompatActivity() {
         }
         applyTodayPlanStepCompletedStyle(title, meta, check, entry.isCompleted)
         check.isEnabled = !homeRoadmapPatchInFlight
-        val stepRow = row.findViewById<View>(R.id.homeTodayPlanStepRow)
-        stepRow.isClickable = !homeRoadmapPatchInFlight
-        stepRow.background = null
-        stepRow.setOnClickListener {
-            if (!homeRoadmapPatchInFlight) check.performClick()
+        val textColumn = row.findViewById<View>(R.id.homeTodayPlanStepTextColumn)
+        textColumn.isClickable = !homeRoadmapPatchInFlight
+        textColumn.setOnClickListener {
+            if (!homeRoadmapPatchInFlight) {
+                RoadmapStepDetailBottomSheet.show(this, step, entry.task.title)
+            }
         }
         RoadmapEstimateFeedbackUi.bind(
             root = row,
