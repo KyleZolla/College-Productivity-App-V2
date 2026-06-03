@@ -9,7 +9,7 @@ data class TodayPlanEntry(
     val task: SupabaseTasksApi.TaskRow,
     val step: RoadmapStep?,
     val stepIndex: Int,
-    /** For complex steps: recommended date. For simple tasks: due date (date only). */
+    /** For complex steps: recommended date. For simple tasks: plan day (may be before the due date). */
     val recommendedOn: LocalDate,
     val isSimple: Boolean,
 ) {

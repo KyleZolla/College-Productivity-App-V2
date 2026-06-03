@@ -790,14 +790,14 @@ class HomeActivity : AppCompatActivity() {
                         is SupabaseTasksApi.ListResult.Success -> completedAll.tasks.filter { task ->
                             TaskKind.isSimpleTask(task) &&
                                 TodayPlanWork.wasTaskCompletedToday(task, today) &&
-                                TodayPlanWork.simpleTaskDueLocalDate(task)?.let { !it.isAfter(today) } == true
+                                TodayPlanWork.simpleTaskPlanLocalDate(task)?.let { !it.isAfter(today) } == true
                         }
                         is SupabaseTasksApi.ListResult.Failure -> emptyList()
                     }
                     val simpleFutureCompletedForGetAhead = when (completedAll) {
                         is SupabaseTasksApi.ListResult.Success -> completedAll.tasks.filter { task ->
                             TaskKind.isSimpleTask(task) &&
-                                TodayPlanWork.simpleTaskDueLocalDate(task)?.isAfter(today) == true &&
+                                TodayPlanWork.simpleTaskPlanLocalDate(task)?.isAfter(today) == true &&
                                 TodayPlanWork.wasTaskCompletedToday(task, today)
                         }
                         is SupabaseTasksApi.ListResult.Failure -> emptyList()
@@ -2351,8 +2351,8 @@ class HomeActivity : AppCompatActivity() {
 
         val pinKey = "$taskId:simple"
         val today = LocalDate.now()
-        val due = TodayPlanWork.simpleTaskDueLocalDate(task)
-        val isFutureDue = due != null && due.isAfter(today)
+        val planOn = TodayPlanWork.simpleTaskPlanLocalDate(task)
+        val isFuturePlan = planOn != null && planOn.isAfter(today)
         val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
         val userIdForAchievements = achievementsUserId ?: SupabaseUserId.resolveUserId(token)
         val beforeSnapshot = homeTasksSnapshot
@@ -2361,7 +2361,7 @@ class HomeActivity : AppCompatActivity() {
         val hadOverdueBefore = TodayPlanWork.hasIncompleteOverdueSteps(beforeSnapshot, today)
 
         if (checked) {
-            if (isFutureDue) {
+            if (isFuturePlan) {
                 homeGetAheadPinnedCheckedKeys.add(pinKey)
             } else {
                 homeTodayPlanPinnedCheckedKeys.add(pinKey)
@@ -2958,13 +2958,13 @@ class HomeActivity : AppCompatActivity() {
         }
         val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
         val pinKey = "${task.id}:simple"
-        val due = TodayPlanWork.simpleTaskDueLocalDate(task)
+        val planOn = TodayPlanWork.simpleTaskPlanLocalDate(task)
         val today = LocalDate.now()
-        val isFutureDue = due != null && due.isAfter(today)
+        val isFuturePlan = planOn != null && planOn.isAfter(today)
         if (checked) {
-            if (isFutureDue) {
+            if (isFuturePlan) {
                 homeGetAheadPinnedCheckedKeys.add(pinKey)
-            } else if (due != null && !due.isAfter(today)) {
+            } else if (planOn != null && !planOn.isAfter(today)) {
                 homeTodayPlanPinnedCheckedKeys.add(pinKey)
             }
         } else {
@@ -2983,9 +2983,9 @@ class HomeActivity : AppCompatActivity() {
                     if (checked) {
                         homeTodayPlanPinnedCheckedKeys.remove(pinKey)
                         homeGetAheadPinnedCheckedKeys.remove(pinKey)
-                    } else if (isFutureDue) {
+                    } else if (isFuturePlan) {
                         homeGetAheadPinnedCheckedKeys.add(pinKey)
-                    } else if (due != null && !due.isAfter(today)) {
+                    } else if (planOn != null && !planOn.isAfter(today)) {
                         homeTodayPlanPinnedCheckedKeys.add(pinKey)
                     }
                     tasksAdapter.notifyDataSetChanged()

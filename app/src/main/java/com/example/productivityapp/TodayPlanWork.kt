@@ -2,11 +2,15 @@ package com.example.productivityapp
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 
 object TodayPlanWork {
 
     const val SIMPLE_TASK_HOURS = 0.5
+
+    /** Simple tasks due at/before this time appear on the prior day's plan (not the due day). */
+    private val SIMPLE_TASK_PLAN_DAY_THRESHOLD = LocalTime.NOON
 
     /** Calendar day (device zone) when the task was marked complete, if [TaskRow.completedAt] is set. */
     fun taskCompletionLocalDate(
@@ -35,8 +39,8 @@ object TodayPlanWork {
     ): Boolean {
         for (task in tasks) {
             if (TaskKind.isSimpleTask(task)) {
-                val due = simpleTaskDueLocalDate(task) ?: continue
-                if (due.isBefore(today) && task.status != TaskStatus.COMPLETE) return true
+                val planOn = simpleTaskPlanLocalDate(task) ?: continue
+                if (planOn.isBefore(today) && task.status != TaskStatus.COMPLETE) return true
                 continue
             }
             val steps = RoadmapStep.parseList(task.roadmap)
@@ -51,7 +55,18 @@ object TodayPlanWork {
     fun simpleTaskDueLocalDate(task: SupabaseTasksApi.TaskRow): LocalDate? =
         task.dueDate?.toLocalDate()
 
-    /** Simple tasks due today or earlier (includes completed — used for scope/progress/review). */
+    /** Calendar day when a simple task belongs on Today's Plan / Get ahead (may be before the due date). */
+    fun simpleTaskPlanLocalDate(task: SupabaseTasksApi.TaskRow): LocalDate? {
+        val due = task.dueDate ?: return null
+        val dueDay = due.toLocalDate()
+        return if (!due.toLocalTime().isAfter(SIMPLE_TASK_PLAN_DAY_THRESHOLD)) {
+            dueDay.minusDays(1)
+        } else {
+            dueDay
+        }
+    }
+
+    /** Simple tasks scheduled today or earlier on the plan (includes completed — used for scope/progress/review). */
     fun collectSimpleTodayPlanEntries(
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
@@ -59,14 +74,14 @@ object TodayPlanWork {
         val out = ArrayList<TodayPlanEntry>()
         for (task in tasks) {
             if (!TaskKind.isSimpleTask(task)) continue
-            val due = simpleTaskDueLocalDate(task) ?: continue
-            if (due.isAfter(today)) continue
+            val planOn = simpleTaskPlanLocalDate(task) ?: continue
+            if (planOn.isAfter(today)) continue
             out.add(
                 TodayPlanEntry(
                     task = task,
                     step = null,
                     stepIndex = TodayPlanEntry.SIMPLE_STEP_INDEX,
-                    recommendedOn = due,
+                    recommendedOn = planOn,
                     isSimple = true,
                 ),
             )
@@ -83,8 +98,8 @@ object TodayPlanWork {
         val out = ArrayList<TodayPlanEntry>()
         for (task in tasks) {
             if (!TaskKind.isSimpleTask(task)) continue
-            val due = simpleTaskDueLocalDate(task) ?: continue
-            if (!due.isAfter(today)) continue
+            val planOn = simpleTaskPlanLocalDate(task) ?: continue
+            if (!planOn.isAfter(today)) continue
             val pinKey = "${task.id}:simple"
             if (task.status == TaskStatus.COMPLETE &&
                 pinKey !in getAheadPinnedKeys &&
@@ -97,7 +112,7 @@ object TodayPlanWork {
                     task = task,
                     step = null,
                     stepIndex = TodayPlanEntry.SIMPLE_STEP_INDEX,
-                    recommendedOn = due,
+                    recommendedOn = planOn,
                     isSimple = true,
                 ),
             )
