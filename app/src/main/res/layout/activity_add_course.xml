@@ -127,7 +127,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:text="@string/add_task_ai_doc_picker_button" />
+                android:text="@string/course_syllabus_doc_picker_button" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/chooseSyllabusPhotoButton"
@@ -135,7 +135,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="@string/add_task_ai_photo_picker_button" />
+                android:text="@string/course_syllabus_photo_picker_button" />
 
             <TextView
                 android:id="@+id/selectedSyllabusLabel"

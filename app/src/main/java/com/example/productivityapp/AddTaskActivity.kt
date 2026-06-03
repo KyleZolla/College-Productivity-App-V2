@@ -4,7 +4,6 @@ import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -15,8 +14,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
@@ -25,13 +22,10 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.Calendar
 import java.util.concurrent.Executors
-import org.json.JSONArray
 
 class AddTaskActivity : AppCompatActivity() {
 
     private val networkExecutor = Executors.newSingleThreadExecutor()
-    private val logTag = "AddTaskActivity"
-    private var activeDialog: AlertDialog? = null
     private var courseOptions: List<CourseSelectorHelper.CourseOption> = emptyList()
     private lateinit var courseDropdown: MaterialAutoCompleteTextView
 
@@ -173,31 +167,14 @@ class AddTaskActivity : AppCompatActivity() {
             refreshTaskTypeUi()
         }
 
-        fun navigateAfterCreate(taskId: String, title: String, due: LocalDateTime, status: TaskStatus) {
-            val dueDisplay = DueDateTimeFormat.displayFull(due)
-            val dueIso = TaskDueParsing.toIsoParam(due)
+        fun navigateToTasksTab() {
             startActivity(
                 Intent(this, HomeActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     putExtra(HomeActivity.EXTRA_SELECTED_TAB, HomeActivity.TAB_TASKS)
-                }
-            )
-            startActivity(
-                Intent(this, TaskDetailActivity::class.java).apply {
-                    putExtra(TaskDetailActivity.EXTRA_TASK_ID, taskId)
-                    putExtra(TaskDetailActivity.EXTRA_TASK_TITLE, title)
-                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_DISPLAY, dueDisplay)
-                    putExtra(TaskDetailActivity.EXTRA_TASK_DUE_ISO, dueIso)
-                    putExtra(TaskDetailActivity.EXTRA_TASK_STATUS, status.apiValue)
-                }
+                },
             )
             finish()
-        }
-
-        fun finishCreating(originalText: CharSequence) {
-            createButton.isEnabled = true
-            cancelButton.isEnabled = true
-            createButton.text = originalText
         }
 
         fun refreshDueLabel() {
@@ -274,174 +251,23 @@ class AddTaskActivity : AppCompatActivity() {
             val creatingComplex = isComplexMode
             val selectedCourseId = CourseSelectorHelper.selectedCourseId(courseDropdown, courseOptions)
 
-            createButton.isEnabled = false
-            cancelButton.isEnabled = false
-            val originalCreateText = createButton.text
-            createButton.text = getString(R.string.status_creating_task)
-
-            networkExecutor.execute {
-                val insertResult = SupabaseTasksApi.insertTask(
-                    accessToken,
-                    userId,
-                    title,
-                    due,
-                    selectedCourseId,
-                )
-                runOnUiThread { finishCreating(originalCreateText) }
-
-                when (insertResult) {
-                    is SupabaseTasksApi.InsertResult.Failure -> runOnUiThread {
-                        Toast.makeText(
-                            this,
-                            getString(R.string.error_task_create_failed) + "\n" + insertResult.message,
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-
-                    is SupabaseTasksApi.InsertResult.Success -> {
-                        val taskId = insertResult.id
-
-                        if (!creatingComplex) {
-                            runOnUiThread {
-                                navigateAfterCreate(taskId, title, due, insertResult.status)
-                            }
-                            return@execute
-                        }
-
-                        val dueIso = TaskDueParsing.toIsoParam(due)
-
-                        val documentContent = selectedDoc?.let { uri ->
-                            when (val res = DocumentContentExtractor.extractText(this, uri)) {
-                                is DocumentContentExtractor.Result.Success -> res.content
-                                is DocumentContentExtractor.Result.Failure -> {
-                                    runOnUiThread {
-                                        val msg = "Could not read document.\n${res.message}"
-                                        Log.w(logTag, msg)
-                                        if (!isFinishing && !isDestroyed) {
-                                            activeDialog?.dismiss()
-                                            activeDialog = MaterialAlertDialogBuilder(this)
-                                                .setTitle("Document upload skipped")
-                                                .setMessage(res.message)
-                                                .setPositiveButton(android.R.string.ok, null)
-                                                .show()
-                                        }
-                                    }
-                                    null
-                                }
-                            }
-                        }
-
-                        val photoText = selectedPhoto?.let { uri ->
-                            when (val res = PhotoTextExtractor.extractText(this, uri)) {
-                                is PhotoTextExtractor.Result.Success -> res.text
-                                is PhotoTextExtractor.Result.Failure -> {
-                                    runOnUiThread {
-                                        val msg = "Could not read text from photo.\n${res.message}"
-                                        Log.w(logTag, msg)
-                                        if (!isFinishing && !isDestroyed) {
-                                            activeDialog?.dismiss()
-                                            activeDialog = MaterialAlertDialogBuilder(this)
-                                                .setTitle("Photo text skipped")
-                                                .setMessage(res.message)
-                                                .setPositiveButton(android.R.string.ok, null)
-                                                .show()
-                                        }
-                                    }
-                                    null
-                                }
-                            }
-                        }
-
-                        val courseContext = resolveCourseContextForRoadmap(accessToken, selectedCourseId)
-                        val profileContext = resolveProfileContextForRoadmap(accessToken)
-
-                        val roadmapConfidence = RoadmapConfidenceCalculator.calculate(
-                            RoadmapConfidenceInput(
-                                documentContent = documentContent,
-                                photoText = photoText,
-                                requirements = requirements,
-                                userEstimatedHours = userEstimatedHours,
-                                courseSelected = !selectedCourseId.isNullOrBlank(),
-                            ),
-                        )
-
-                        val roadmapSteps = when (val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
-                            accessToken = accessToken,
-                            title = title,
-                            dueDateIso = dueIso,
-                            assignmentType = assignmentType,
-                            difficulty = difficulty,
-                            requirements = requirements,
-                            documentContent = documentContent,
-                            photoText = photoText,
-                            courseName = courseContext.first,
-                            courseLevel = courseContext.second,
-                            courseProfile = courseContext.third,
-                            school = profileContext.first,
-                            yearInSchool = profileContext.second,
-                            userEstimatedHours = userEstimatedHours,
-                        )) {
-                            is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
-                            is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {
-                                Log.e(logTag, "Roadmap generation failed.\n${roadmapResult.message}")
-                                JSONArray()
-                            }
-                        }
-
-                        if (roadmapSteps.length() == 0) {
-                            when (val confidenceResult = SupabaseTasksApi.updateRoadmapConfidence(
-                                accessToken = accessToken,
-                                taskId = taskId,
-                                roadmapConfidence = roadmapConfidence,
-                            )) {
-                                is SupabaseTasksApi.PatchRoadmapResult.Failure -> Log.w(
-                                    logTag,
-                                    "Could not save roadmap confidence.\n${confidenceResult.message}",
-                                )
-                                SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
-                            }
-                            runOnUiThread {
-                                Log.w(logTag, "Edge Function returned 0 steps; saving as simple task.")
-                                if (!isFinishing && !isDestroyed) {
-                                    activeDialog?.dismiss()
-                                    activeDialog = MaterialAlertDialogBuilder(this)
-                                        .setTitle(R.string.add_task_complex_fallback_title)
-                                        .setMessage(R.string.add_task_complex_fallback_message)
-                                        .setPositiveButton(android.R.string.ok, null)
-                                        .show()
-                                }
-                            }
-                        } else {
-                            when (val patchResult = SupabaseTasksApi.updateTaskRoadmap(
-                                accessToken = accessToken,
-                                taskId = taskId,
-                                roadmapSteps = roadmapSteps,
-                                roadmapConfidence = roadmapConfidence,
-                            )) {
-                                is SupabaseTasksApi.PatchRoadmapResult.Failure -> runOnUiThread {
-                                    val msg = "Could not save roadmap.\n${patchResult.message}"
-                                    Log.e(logTag, msg)
-                                    if (!isFinishing && !isDestroyed) {
-                                        activeDialog?.dismiss()
-                                        activeDialog = MaterialAlertDialogBuilder(this)
-                                            .setTitle("Could not save roadmap")
-                                            .setMessage(patchResult.message)
-                                            .setPositiveButton(android.R.string.ok, null)
-                                            .show()
-                                    }
-                                }
-                                SupabaseTasksApi.PatchRoadmapResult.Success -> runOnUiThread {
-                                    Log.d(logTag, "Roadmap saved for taskId=$taskId steps=${roadmapSteps.length()}")
-                                }
-                            }
-                        }
-
-                        runOnUiThread {
-                            navigateAfterCreate(taskId, title, due, insertResult.status)
-                        }
-                    }
-                }
-            }
+            BackgroundCreateJobs.enqueueTaskCreate(
+                context = this,
+                accessToken = accessToken,
+                userId = userId,
+                title = title,
+                due = due,
+                selectedCourseId = selectedCourseId,
+                creatingComplex = creatingComplex,
+                assignmentType = assignmentType,
+                difficulty = difficulty,
+                requirements = requirements,
+                userEstimatedHours = userEstimatedHours,
+                selectedDocUri = selectedDoc,
+                selectedPhotoUri = selectedPhoto,
+            )
+            Toast.makeText(this, R.string.status_creating_task_background, Toast.LENGTH_SHORT).show()
+            navigateToTasksTab()
         }
 
         cancelButton.setOnClickListener {
@@ -475,44 +301,7 @@ class AddTaskActivity : AppCompatActivity() {
         return text.toDoubleOrNull()
     }
 
-    private fun resolveProfileContextForRoadmap(
-        accessToken: String,
-    ): Pair<String?, String?> {
-        val userId = SupabaseUserId.resolveUserId(accessToken) ?: return Pair(null, null)
-        return when (val result = SupabaseProfilesApi.get(accessToken, userId)) {
-            is SupabaseProfilesApi.GetResult.Success -> Pair(result.row.school, result.row.yearInSchool)
-            is SupabaseProfilesApi.GetResult.NotFound,
-            is SupabaseProfilesApi.GetResult.Failure,
-            -> {
-                if (result is SupabaseProfilesApi.GetResult.Failure) {
-                    Log.w(logTag, "Could not load profile for roadmap.\n${result.message}")
-                }
-                Pair(null, null)
-            }
-        }
-    }
-
-    private fun resolveCourseContextForRoadmap(
-        accessToken: String,
-        courseId: String?,
-    ): Triple<String?, String?, String?> {
-        if (courseId.isNullOrBlank()) return Triple(null, null, null)
-        return when (val result = SupabaseCoursesApi.getCourse(accessToken, courseId)) {
-            is SupabaseCoursesApi.GetResult.Success -> Triple(
-                result.course.name,
-                result.course.level,
-                result.course.courseProfile,
-            )
-            is SupabaseCoursesApi.GetResult.Failure -> {
-                Log.w(logTag, "Could not load course for roadmap.\n${result.message}")
-                Triple(null, null, null)
-            }
-        }
-    }
-
     override fun onDestroy() {
-        activeDialog?.dismiss()
-        activeDialog = null
         super.onDestroy()
         networkExecutor.shutdownNow()
     }

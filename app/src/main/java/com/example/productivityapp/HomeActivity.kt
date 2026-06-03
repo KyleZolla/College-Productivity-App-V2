@@ -73,6 +73,61 @@ class HomeActivity : AppCompatActivity() {
         ).show()
     }
 
+    private val backgroundCreateListener = object : BackgroundCreateJobs.Listener {
+        override fun onCourseCreateSucceeded(profileSyncFailed: Boolean) {
+            if (isFinishing) return
+            loadMyCourses(showLoading = false)
+            if (currentTab == Tab.Home) {
+                loadHomeUpcoming(showLoading = false)
+            }
+            Toast.makeText(
+                this@HomeActivity,
+                if (profileSyncFailed) {
+                    R.string.course_profile_generation_failed
+                } else {
+                    R.string.course_saved
+                },
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+
+        override fun onCourseCreateFailed(message: String) {
+            if (isFinishing) return
+            Toast.makeText(
+                this@HomeActivity,
+                getString(R.string.error_course_save_failed) + "\n" + message,
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+
+        override fun onTaskCreateSucceeded() {
+            if (isFinishing) return
+            loadTasks(showLoading = false)
+            if (currentTab == Tab.Home) {
+                loadHomeUpcoming(showLoading = false)
+            }
+            Toast.makeText(this@HomeActivity, R.string.task_saved, Toast.LENGTH_SHORT).show()
+        }
+
+        override fun onTaskCreateFailed(message: String) {
+            if (isFinishing) return
+            Toast.makeText(
+                this@HomeActivity,
+                getString(R.string.error_task_create_failed) + "\n" + message,
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+
+        override fun onTaskCreateNotice(title: String, message: String) {
+            if (isFinishing) return
+            MaterialAlertDialogBuilder(this@HomeActivity)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+    }
+
     private val networkExecutor = Executors.newSingleThreadExecutor()
     private var currentTab: Tab = Tab.Home
 
@@ -353,6 +408,16 @@ class HomeActivity : AppCompatActivity() {
 
         applyRequestedTab(intent)
         FcmTokenRegistrar.syncIfLoggedIn(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        BackgroundCreateJobs.addListener(backgroundCreateListener)
+    }
+
+    override fun onStop() {
+        BackgroundCreateJobs.removeListener(backgroundCreateListener)
+        super.onStop()
     }
 
     override fun onResume() {

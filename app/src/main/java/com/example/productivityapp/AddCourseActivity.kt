@@ -3,8 +3,10 @@ package com.example.productivityapp
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
@@ -81,7 +83,7 @@ class AddCourseActivity : AppCompatActivity() {
         selectedSyllabusLabel = findViewById(R.id.selectedSyllabusLabel)
 
         findViewById<MaterialButton>(R.id.chooseSyllabusDocButton).setOnClickListener {
-            pickDocumentLauncher.launch(arrayOf("*/*"))
+            pickDocumentLauncher.launch(SYLLABUS_DOCUMENT_MIME_TYPES)
         }
         findViewById<MaterialButton>(R.id.chooseSyllabusPhotoButton).setOnClickListener {
             pickPhotoLauncher.launch("image/*")
@@ -168,6 +170,28 @@ class AddCourseActivity : AppCompatActivity() {
         val docUri = selectedDocUri
         val photoUri = selectedPhotoUri
         val courseId = editingCourseId
+
+        if (courseId == null) {
+            BackgroundCreateJobs.enqueueCourseCreate(
+                context = this,
+                accessToken = accessToken,
+                userId = userId,
+                name = name,
+                level = level,
+                docUri = docUri,
+                photoUri = photoUri,
+            )
+            Toast.makeText(this, R.string.status_creating_course_background, Toast.LENGTH_SHORT).show()
+            startActivity(
+                Intent(this, HomeActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra(HomeActivity.EXTRA_SELECTED_TAB, HomeActivity.TAB_PROFILE)
+                },
+            )
+            finish()
+            return
+        }
+
         saveButton.isEnabled = false
         val originalText = saveButton.text
         saveButton.text = getString(R.string.status_saving_course)
@@ -259,20 +283,38 @@ class AddCourseActivity : AppCompatActivity() {
         selectedSyllabusLabel.text = when {
             doc != null && photo != null -> getString(
                 R.string.course_syllabus_doc_and_photo_selected,
-                doc.lastPathSegment ?: doc.toString(),
-                photo.lastPathSegment ?: photo.toString(),
+                uriDisplayName(doc),
+                uriDisplayName(photo),
             )
-            doc != null -> getString(
-                R.string.add_task_ai_doc_selected,
-                doc.lastPathSegment ?: doc.toString(),
-            )
-            photo != null -> getString(
-                R.string.add_task_ai_photo_selected,
-                photo.lastPathSegment ?: photo.toString(),
-            )
+            doc != null -> getString(R.string.course_syllabus_doc_selected, uriDisplayName(doc))
+            photo != null -> getString(R.string.course_syllabus_photo_selected, uriDisplayName(photo))
             !existingSyllabus.isNullOrBlank() -> getString(R.string.course_syllabus_on_file)
             else -> getString(R.string.course_syllabus_none)
         }
+    }
+
+    private fun uriDisplayName(uri: Uri): String {
+        var cursor: Cursor? = null
+        try {
+            cursor = contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )
+            if (cursor != null && cursor.moveToFirst()) {
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) {
+                    cursor.getString(idx)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+                }
+            }
+        } catch (_: Exception) {
+            // Fall back to URI path below.
+        } finally {
+            cursor?.close()
+        }
+        return uri.lastPathSegment?.trim()?.takeIf { it.isNotEmpty() } ?: uri.toString()
     }
 
     private fun readSelectedLevel(group: ChipGroup): String? {
@@ -322,6 +364,15 @@ class AddCourseActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_COURSE_ID = "course_id"
         const val EXTRA_WAS_EDIT = "was_edit"
+
+        /** PDF, Word, and text files — not images (use the photo picker for those). */
+        private val SYLLABUS_DOCUMENT_MIME_TYPES = arrayOf(
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "text/*",
+            "application/*",
+        )
 
         fun createIntent(context: Context): Intent =
             Intent(context, AddCourseActivity::class.java)

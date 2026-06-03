@@ -184,6 +184,8 @@
     <string name="task_detail_due_saved">Due date saved.</string>
     <string name="error_task_due_update_failed">Could not update due date.</string>
     <string name="status_creating_task">Creating task…</string>
+    <string name="status_creating_task_background">Creating task in the background…</string>
+    <string name="task_saved">Task saved.</string>
     <string name="error_task_title_required">Enter a task name.</string>
     <string name="error_task_due_required">Pick a due date.</string>
     <string name="error_task_not_signed_in">You need to be signed in.</string>
@@ -256,6 +258,7 @@
     <string name="edit_course_title">Edit course</string>
     <string name="save_course">Save</string>
     <string name="status_saving_course">Saving…</string>
+    <string name="status_creating_course_background">Creating course in the background…</string>
     <string name="status_generating_course_profile">Generating course profile…</string>
     <string name="course_profile_generation_failed">Course saved, but profile generation failed.</string>
     <string name="course_name_hint">Course name</string>
@@ -267,7 +270,11 @@
     <string name="course_level_graduate">Graduate</string>
     <string name="course_level_display">Level %1$s</string>
     <string name="course_syllabus_label">Syllabus upload</string>
-    <string name="course_syllabus_subtitle">Optional — upload a document or photo to extract syllabus text</string>
+    <string name="course_syllabus_subtitle">Optional — PDF or Word: tap Choose PDF/document. Scanned pages: tap Choose photo.</string>
+    <string name="course_syllabus_doc_picker_button">Choose PDF / document</string>
+    <string name="course_syllabus_photo_picker_button">Choose photo</string>
+    <string name="course_syllabus_doc_selected">Document: %1$s</string>
+    <string name="course_syllabus_photo_selected">Photo: %1$s</string>
     <string name="course_syllabus_none">No file selected</string>
     <string name="course_syllabus_on_file">Syllabus saved — upload a new file to replace it</string>
     <string name="course_syllabus_doc_and_photo_selected">Document: %1$s\nPhoto: %2$s</string>
