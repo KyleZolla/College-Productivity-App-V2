@@ -104,6 +104,14 @@ class HomeActivity : AppCompatActivity() {
             ).show()
         }
 
+        override fun onCourseCreateNotice(message: String) {
+            if (isFinishing) return
+            MaterialAlertDialogBuilder(this@HomeActivity)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
+
         override fun onTaskCreateSucceeded() {
             if (isFinishing) return
             loadTasks(showLoading = false)

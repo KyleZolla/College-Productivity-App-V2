@@ -12,6 +12,13 @@ object CourseProfileCoordinator {
         /** Profile was generated or cleared successfully. */
         object Success : SyncResult()
 
+        /**
+         * Course row is saved, but the free syllabus-profile limit was reached so no AI
+         * profile was generated. Not an error — the course exists without AI analysis.
+         * [message] is the server-provided user-facing text, or null to use the app default.
+         */
+        data class LimitReached(val message: String?) : SyncResult()
+
         /** Course row is saved; profile sync failed. */
         data class Failure(val message: String) : SyncResult()
     }
@@ -44,8 +51,18 @@ object CourseProfileCoordinator {
         }
 
         val syllabus = saved ?: return SyncResult.Skipped
+
+        // Free MVP check: skip the course-profile Edge Function once the rolling-window
+        // limit is reached. The course is already saved; we just leave it without an
+        // AI-generated profile. (The Edge Function also enforces this server-side.)
+        val userId = SupabaseUserId.resolveUserId(accessToken)
+        if (userId != null && SupabaseAiUsageApi.isSyllabusProfileLimitReached(accessToken, userId)) {
+            return SyncResult.LimitReached(message = null)
+        }
+
         return when (
             val generated = SupabaseEdgeFunctionsApi.generateCourseProfile(
+                accessToken = accessToken,
                 courseName = courseName,
                 courseLevel = courseLevel,
                 courseSyllabus = syllabus,
@@ -62,6 +79,8 @@ object CourseProfileCoordinator {
                 is SupabaseCoursesApi.UpdateProfileResult.Failure ->
                     SyncResult.Failure(update.message)
             }
+            is SupabaseEdgeFunctionsApi.CourseProfileResult.LimitReached ->
+                SyncResult.LimitReached(message = generated.message)
             is SupabaseEdgeFunctionsApi.CourseProfileResult.Failure ->
                 SyncResult.Failure(generated.message)
         }

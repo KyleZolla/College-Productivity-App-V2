@@ -24,6 +24,7 @@ object BackgroundCreateJobs {
     interface Listener {
         fun onCourseCreateSucceeded(profileSyncFailed: Boolean) {}
         fun onCourseCreateFailed(message: String) {}
+        fun onCourseCreateNotice(message: String) {}
         fun onTaskCreateSucceeded() {}
         fun onTaskCreateFailed(message: String) {}
         fun onTaskCreateNotice(title: String, message: String) {}
@@ -76,6 +77,8 @@ object BackgroundCreateJobs {
                         isEdit = false,
                     )
                     val profileSyncFailed = profileSync is CourseProfileCoordinator.SyncResult.Failure
+                    val profileLimit =
+                        profileSync as? CourseProfileCoordinator.SyncResult.LimitReached
                     AppEventsApi.logAppEvent(
                         accessToken = accessToken,
                         eventName = "course_created",
@@ -85,9 +88,16 @@ object BackgroundCreateJobs {
                             .put("has_document", docUri != null)
                             .put("has_photo", photoUri != null)
                             .put("level", savedCourse.level)
-                            .put("course_profile_sync_failed", profileSyncFailed),
+                            .put("course_profile_sync_failed", profileSyncFailed)
+                            .put("syllabus_profile_limit_reached", profileLimit != null),
                     )
                     notifyCourseCreateSucceeded(profileSyncFailed)
+                    if (profileLimit != null) {
+                        notifyCourseCreateNotice(
+                            profileLimit.message?.takeIf { it.isNotBlank() }
+                                ?: appContext.getString(R.string.ai_syllabus_limit_reached),
+                        )
+                    }
                 }
             }
         }
@@ -147,6 +157,36 @@ object BackgroundCreateJobs {
 
                     val taskId = insertResult.id
                     val dueIso = TaskDueParsing.toIsoParam(due)
+
+                    // Free MVP check: skip the roadmap Edge Function once the rolling-window
+                    // limit is reached. The task is still created; the user can use it as a
+                    // simple task. (The Edge Function also enforces this server-side.)
+                    if (SupabaseAiUsageApi.isComplexRoadmapLimitReached(accessToken, userId)) {
+                        AppEventsApi.logAppEvent(
+                            accessToken = accessToken,
+                            eventName = "task_created",
+                            taskId = taskId,
+                            courseId = selectedCourseId,
+                            metadata = JSONObject()
+                                .put("task_kind", "complex")
+                                .put("has_course", !selectedCourseId.isNullOrBlank())
+                                .put("has_due_date", true)
+                                .put("has_roadmap", false)
+                                .put("ai_roadmap_limit_reached", true),
+                        )
+                        AppEventsApi.logAppEvent(
+                            accessToken = accessToken,
+                            eventName = "complex_task_created",
+                            taskId = taskId,
+                            courseId = selectedCourseId,
+                        )
+                        notifyTaskCreateNotice(
+                            title = "",
+                            message = appContext.getString(R.string.ai_roadmap_limit_reached),
+                        )
+                        notifyTaskCreateSucceeded()
+                        return@execute
+                    }
 
                     val documentContent = selectedDocUri?.let { uri ->
                         when (val res = DocumentContentExtractor.extractText(appContext, uri)) {
@@ -216,6 +256,36 @@ object BackgroundCreateJobs {
                             roadmapFailureMessage = roadmapResult.message
                             roadmapFailureKind = roadmapResult.kind
                             JSONArray()
+                        }
+                        is SupabaseEdgeFunctionsApi.RoadmapResult.LimitReached -> {
+                            // Server reported the free AI limit. The task already exists; we keep it
+                            // without a roadmap and show the server message instead of the generic
+                            // roadmap-failure message. We do not save a broken/empty roadmap.
+                            Log.w(LOG_TAG, "Roadmap skipped: AI limit reached.")
+                            val limitMessage = roadmapResult.message.ifBlank {
+                                appContext.getString(R.string.ai_roadmap_limit_reached)
+                            }
+                            AppEventsApi.logAppEvent(
+                                accessToken = accessToken,
+                                eventName = "task_created",
+                                taskId = taskId,
+                                courseId = selectedCourseId,
+                                metadata = JSONObject()
+                                    .put("task_kind", "complex")
+                                    .put("has_course", !selectedCourseId.isNullOrBlank())
+                                    .put("has_due_date", true)
+                                    .put("has_roadmap", false)
+                                    .put("ai_roadmap_limit_reached", true),
+                            )
+                            AppEventsApi.logAppEvent(
+                                accessToken = accessToken,
+                                eventName = "complex_task_created",
+                                taskId = taskId,
+                                courseId = selectedCourseId,
+                            )
+                            notifyTaskCreateNotice(title = "", message = limitMessage)
+                            notifyTaskCreateSucceeded()
+                            return@execute
                         }
                     }
 
@@ -400,6 +470,12 @@ object BackgroundCreateJobs {
     private fun notifyCourseCreateFailed(message: String) {
         mainHandler.post {
             listeners.forEach { it.onCourseCreateFailed(message) }
+        }
+    }
+
+    private fun notifyCourseCreateNotice(message: String) {
+        mainHandler.post {
+            listeners.forEach { it.onCourseCreateNotice(message) }
         }
     }
 

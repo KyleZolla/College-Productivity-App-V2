@@ -161,6 +161,7 @@
     <string name="add_task_complex_fallback_title">Saved as simple task</string>
     <string name="roadmap_generation_failed">Couldn\u2019t generate roadmap. Please try again.</string>
     <string name="roadmap_response_incomplete">The roadmap response was incomplete. Please try again.</string>
+    <string name="ai_roadmap_limit_reached">You\u2019ve used your 5 free AI roadmaps in the last 7 days. You can still create simple tasks.</string>
     <string name="task_detail_mark_complete">Mark complete</string>
     <string name="task_detail_roadmap_confidence">Roadmap confidence: %1$s</string>
     <string name="task_detail_roadmap_confidence_low_hint">Add instructions for a better roadmap.</string>
@@ -271,6 +272,7 @@
     <string name="status_creating_course_background">Creating course in the background…</string>
     <string name="status_generating_course_profile">Generating course profile…</string>
     <string name="course_profile_generation_failed">Course saved, but profile generation failed.</string>
+    <string name="ai_syllabus_limit_reached">You\u2019ve used your 10 free syllabus profiles in the last 90 days. You can still add the course without AI syllabus analysis.</string>
     <string name="course_name_hint">Course name</string>
     <string name="course_level_label">Course level</string>
     <string name="course_level_100">100</string>

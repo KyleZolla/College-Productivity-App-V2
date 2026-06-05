@@ -253,12 +253,23 @@ class AddCourseActivity : AppCompatActivity() {
                             Activity.RESULT_OK,
                             Intent().putExtra(EXTRA_WAS_EDIT, courseId != null),
                         )
-                        if (profileSync is CourseProfileCoordinator.SyncResult.Failure) {
-                            Toast.makeText(
-                                this,
-                                R.string.course_profile_generation_failed,
-                                Toast.LENGTH_LONG,
-                            ).show()
+                        when (profileSync) {
+                            is CourseProfileCoordinator.SyncResult.Failure ->
+                                Toast.makeText(
+                                    this,
+                                    R.string.course_profile_generation_failed,
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            is CourseProfileCoordinator.SyncResult.LimitReached ->
+                                Toast.makeText(
+                                    this,
+                                    profileSync.message?.takeIf { it.isNotBlank() }
+                                        ?: getString(R.string.ai_syllabus_limit_reached),
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            CourseProfileCoordinator.SyncResult.Skipped,
+                            CourseProfileCoordinator.SyncResult.Success,
+                            -> Unit
                         }
                         finish()
                     }

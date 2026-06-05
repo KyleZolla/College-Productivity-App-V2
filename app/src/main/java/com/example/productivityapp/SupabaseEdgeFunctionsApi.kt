@@ -21,6 +21,9 @@ object SupabaseEdgeFunctionsApi {
             val kind: FailureKind = FailureKind.GENERATION,
         ) : RoadmapResult()
 
+        /** Server reported the free AI limit was reached. [message] is the user-facing text. */
+        data class LimitReached(val message: String) : RoadmapResult()
+
         enum class FailureKind {
             GENERATION,
             INCOMPLETE_RESPONSE,
@@ -30,9 +33,15 @@ object SupabaseEdgeFunctionsApi {
     sealed class CourseProfileResult {
         data class Success(val courseProfile: String) : CourseProfileResult()
         data class Failure(val message: String) : CourseProfileResult()
+
+        /** Server reported the free AI limit was reached. [message] is the user-facing text. */
+        data class LimitReached(val message: String) : CourseProfileResult()
     }
 
     private const val GENERATE_COURSE_PROFILE_SLUG = "generate-course-profile"
+
+    /** Error code returned by the Edge Functions when the free AI usage limit is reached. */
+    private const val AI_LIMIT_REACHED_ERROR = "AI_LIMIT_REACHED"
 
     fun getRoadmap(
         accessToken: String,
@@ -99,12 +108,16 @@ object SupabaseEdgeFunctionsApi {
     }
 
     fun generateCourseProfile(
+        accessToken: String,
         courseName: String,
         courseLevel: String,
         courseSyllabus: String,
     ): CourseProfileResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return CourseProfileResult.Failure("Missing Supabase config.")
+        }
+        if (accessToken.isBlank()) {
+            return CourseProfileResult.Failure("Not signed in.")
         }
         val payload = JSONObject()
             .put("courseName", courseName.trim())
@@ -113,6 +126,7 @@ object SupabaseEdgeFunctionsApi {
         return callGenerateCourseProfileFunction(
             BuildConfig.SUPABASE_URL.trimEnd('/'),
             GENERATE_COURSE_PROFILE_SLUG,
+            accessToken,
             payload,
         )
     }
@@ -120,6 +134,7 @@ object SupabaseEdgeFunctionsApi {
     private fun callGenerateCourseProfileFunction(
         base: String,
         slug: String,
+        accessToken: String,
         payload: JSONObject,
     ): CourseProfileResult {
         return try {
@@ -128,7 +143,7 @@ object SupabaseEdgeFunctionsApi {
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
             connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-            connection.setRequestProperty("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Accept", "application/json")
             connection.connectTimeout = 60000
@@ -142,6 +157,11 @@ object SupabaseEdgeFunctionsApi {
                 ?.bufferedReader()
                 ?.use { it.readText() }
                 .orEmpty()
+
+            parseAiLimitReachedMessage(responseBody)?.let { message ->
+                Log.w("SupabaseEdgeFunctionsApi", "Course profile Edge Function returned AI_LIMIT_REACHED")
+                return CourseProfileResult.LimitReached(message)
+            }
 
             if (responseCode !in 200..299) {
                 val reason = parseError(responseBody, responseCode)
@@ -221,9 +241,7 @@ object SupabaseEdgeFunctionsApi {
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
             connection.setRequestProperty("apikey", BuildConfig.SUPABASE_ANON_KEY)
-            // Use anon key as the bearer token to avoid passing non-Supabase JWTs (e.g. Google ES256)
-            // into the Edge Functions gateway, which will reject them.
-            connection.setRequestProperty("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+            connection.setRequestProperty("Authorization", "Bearer $accessToken")
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Accept", "application/json")
             connection.connectTimeout = 30000
@@ -237,6 +255,11 @@ object SupabaseEdgeFunctionsApi {
                 ?.bufferedReader()
                 ?.use { it.readText() }
                 .orEmpty()
+
+            parseAiLimitReachedMessage(responseBody)?.let { message ->
+                Log.w("SupabaseEdgeFunctionsApi", "Roadmap Edge Function returned AI_LIMIT_REACHED")
+                return RoadmapResult.LimitReached(message)
+            }
 
             if (responseCode !in 200..299) {
                 val reason = parseError(responseBody, responseCode)
@@ -313,6 +336,26 @@ object SupabaseEdgeFunctionsApi {
             if (data is JSONObject) return parseTotalEstimatedHours(data)
         }
         return null
+    }
+
+    /**
+     * Detects the `{ "error": "AI_LIMIT_REACHED", "message": "..." }` response that both AI Edge
+     * Functions return when the free usage limit is hit (regardless of HTTP status code).
+     *
+     * Returns the user-facing message when it is a limit response (empty string if no message was
+     * supplied, so the caller can fall back), or null when it is not a limit response.
+     */
+    private fun parseAiLimitReachedMessage(body: String): String? {
+        val trimmed = body.trim()
+        if (trimmed.isEmpty() || !trimmed.startsWith("{")) return null
+        return try {
+            val obj = JSONObject(trimmed)
+            val error = obj.optString("error").trim()
+            if (!error.equals(AI_LIMIT_REACHED_ERROR, ignoreCase = true)) return null
+            obj.optString("message").trim()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun parseError(body: String, code: Int): String {
