@@ -2,6 +2,7 @@ package com.example.productivityapp
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -64,6 +65,19 @@ object TodayPlanWork {
         } else {
             dueDay
         }
+    }
+
+    /**
+     * Inverse of [simpleTaskPlanLocalDate]: the due date that lands a simple task on [planDay]'s plan,
+     * preserving the task's original time of day. Returns null when the task has no due date.
+     */
+    fun simpleTaskDueForPlanDay(
+        task: SupabaseTasksApi.TaskRow,
+        planDay: LocalDate,
+    ): LocalDateTime? {
+        val time = (task.dueDate ?: return null).toLocalTime()
+        val dueDay = if (!time.isAfter(SIMPLE_TASK_PLAN_DAY_THRESHOLD)) planDay.plusDays(1) else planDay
+        return LocalDateTime.of(dueDay, time)
     }
 
     /** Simple tasks scheduled today or earlier on the plan (includes completed — used for scope/progress/review). */

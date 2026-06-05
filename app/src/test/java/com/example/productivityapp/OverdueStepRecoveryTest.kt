@@ -23,6 +23,18 @@ class OverdueStepRecoveryTest {
         completed = completed,
     )
 
+    private fun simpleTask(
+        id: String,
+        due: LocalDateTime?,
+        status: TaskStatus = TaskStatus.NOT_STARTED,
+    ) = SupabaseTasksApi.TaskRow(
+        id = id,
+        title = "Simple $id",
+        dueDate = due,
+        status = status,
+        roadmap = null,
+    )
+
     @Test
     fun addToToday_movesAllOverdueStepsToToday() {
         val today = LocalDate.of(2026, 5, 30)
@@ -144,6 +156,47 @@ class OverdueStepRecoveryTest {
         assertEquals("2026-05-30", updated[2].recommendedDate)
         assertEquals(tomorrow, updated[3].recommendedDate)
         assertEquals(tomorrow, updated[4].recommendedDate)
+    }
+
+    @Test
+    fun collectSummary_includesOverdueSimpleTask() {
+        val today = LocalDate.of(2026, 6, 1)
+        val tasks = listOf(
+            simpleTask("s1", LocalDateTime.of(today.minusDays(1), LocalTime.of(15, 0))),
+            simpleTask("s2", LocalDateTime.of(today.plusDays(2), LocalTime.of(15, 0))),
+            simpleTask("s3", LocalDateTime.of(today.minusDays(1), LocalTime.of(15, 0)), TaskStatus.COMPLETE),
+        )
+        val summary = OverdueStepRecovery.collectSummary(tasks, today)
+        assertEquals(1, summary.stepCount)
+        val ref = summary.steps.single()
+        assertEquals("s1", ref.taskId)
+        assertTrue(ref.isSimple)
+    }
+
+    @Test
+    fun buildUpdates_movesOverdueSimpleTaskToToday_preservingAfternoonTime() {
+        val today = LocalDate.of(2026, 6, 1)
+        val tasks = listOf(simpleTask("s1", LocalDateTime.of(today.minusDays(1), LocalTime.of(15, 0))))
+        val updates = OverdueStepRecovery.buildUpdates(
+            tasks, today, OverdueStepRecovery.RescheduleMode.ADD_TO_TODAY,
+        )
+        assertTrue(updates.roadmapUpdates.isEmpty())
+        val due = updates.dueUpdates.single()
+        assertEquals("s1", due.taskId)
+        assertEquals(LocalDateTime.of(today, LocalTime.of(15, 0)), due.dueDate)
+    }
+
+    @Test
+    fun buildUpdates_movesMorningSimpleTaskToDayAfterToday_soPlanDayIsToday() {
+        val today = LocalDate.of(2026, 6, 1)
+        // Morning due time (<= noon) plans on the day before the due date, so due must be today+1.
+        val tasks = listOf(simpleTask("s1", LocalDateTime.of(today.minusDays(2), LocalTime.of(9, 0))))
+        val updates = OverdueStepRecovery.buildUpdates(
+            tasks, today, OverdueStepRecovery.RescheduleMode.SPREAD_OUT,
+        )
+        val due = updates.dueUpdates.single()
+        assertEquals(LocalDateTime.of(today.plusDays(1), LocalTime.of(9, 0)), due.dueDate)
+        assertEquals(today, TodayPlanWork.simpleTaskPlanLocalDate(simpleTask("s1", due.dueDate)))
     }
 
     @Test

@@ -4,8 +4,10 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Paint
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -29,8 +31,10 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputEditText
+import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -120,11 +124,13 @@ class HomeActivity : AppCompatActivity() {
 
         override fun onTaskCreateNotice(title: String, message: String) {
             if (isFinishing) return
-            MaterialAlertDialogBuilder(this@HomeActivity)
-                .setTitle(title)
+            val builder = MaterialAlertDialogBuilder(this@HomeActivity)
                 .setMessage(message)
                 .setPositiveButton(android.R.string.ok, null)
-                .show()
+            if (title.isNotBlank()) {
+                builder.setTitle(title)
+            }
+            builder.show()
         }
     }
 
@@ -231,6 +237,8 @@ class HomeActivity : AppCompatActivity() {
     private lateinit var homeRoot: View
     /** taskId:stepIndex -> original recommendedDate before a recovery reschedule. */
     private var overdueRecoveryUndoSnapshot: Map<String, String>? = null
+    /** taskId -> original due date before a recovery reschedule (simple tasks only). */
+    private var overdueRecoveryUndoDueSnapshot: Map<String, LocalDateTime>? = null
     private var overdueRecoveryUndoWasDismissOnly = false
     private var overdueRecoveryKeepAsIsPending = false
     private var overdueRecoveryUndoMessageRes: Int? = null
@@ -246,11 +254,25 @@ class HomeActivity : AppCompatActivity() {
     private var todayPlanAdjustmentDismissed = false
     private var todayPlanAdjustmentSuppressChipCallback = false
     private var todayPlanAdjustmentCachedPlan: TodayPlanAdjustment.Plan? = null
+    private var adjustTodayOpenedLogged = false
+    private var adjustTodayLastMovedStepCount = 0
+
+    private var recoveryCardShownLogged = false
+    private var overdueRecoveryLastAction: String? = null
+    private var overdueRecoveryLastStepCount = 0
+    private var overdueRecoveryLastTaskCount = 0
+
+    private var weekAheadViewedLogged = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_home)
+
+        if (!appOpenedLogged) {
+            appOpenedLogged = true
+            AppEventsApi.logAppEvent(this, "app_opened")
+        }
 
         homeRoot = findViewById(R.id.homeRoot)
         val bottomBar = findViewById<LinearLayout>(R.id.bottomNavBar)
@@ -353,8 +375,21 @@ class HomeActivity : AppCompatActivity() {
         homeWeekAheadNextLine = findViewById(R.id.homeWeekAheadNextLine)
         homeWeekAheadExpandedHost = findViewById(R.id.homeWeekAheadExpandedHost)
         homeWeekAheadCard.setOnClickListener {
+            val wasExpanded = homeWeekAheadExpanded
             homeWeekAheadExpanded = !homeWeekAheadExpanded
-            bindWeekAheadSection(homeTasksSnapshot.filter { it.status != TaskStatus.COMPLETE })
+            val activeTasks = homeTasksSnapshot.filter { it.status != TaskStatus.COMPLETE }
+            if (!wasExpanded && homeWeekAheadExpanded) {
+                val today = LocalDate.now()
+                val summary = WeekAheadWork.computeSummary(activeTasks, today)
+                AppEventsApi.logAppEvent(
+                    this,
+                    "week_ahead_expanded",
+                    metadata = JSONObject()
+                        .put("tasks_due_count", summary.tasksDueCount)
+                        .put("planned_hours", summary.totalPlannedHours),
+                )
+            }
+            bindWeekAheadSection(activeTasks)
         }
         homeUpcomingEmpty = findViewById(R.id.homeUpcomingEmpty)
         homeUpcomingCards = findViewById(R.id.homeUpcomingCards)
@@ -419,6 +454,8 @@ class HomeActivity : AppCompatActivity() {
 
     override fun onStop() {
         BackgroundCreateJobs.removeListener(backgroundCreateListener)
+        // Snackbar is detached when leaving; keep undo state but drop stale view reference.
+        overdueRecoveryUndoSnackbar = null
         super.onStop()
     }
 
@@ -1596,8 +1633,19 @@ class HomeActivity : AppCompatActivity() {
         }
         val summary = OverdueStepRecovery.collectSummary(allActiveTasks, today)
         if (summary.stepCount == 0) {
+            recoveryCardShownLogged = false
             homeOverdueRecoveryCard.visibility = View.GONE
             return
+        }
+        if (!recoveryCardShownLogged) {
+            recoveryCardShownLogged = true
+            AppEventsApi.logAppEvent(
+                this,
+                "recovery_card_shown",
+                metadata = JSONObject()
+                    .put("overdue_step_count", summary.stepCount)
+                    .put("affected_task_count", summary.taskCount),
+            )
         }
         homeOverdueRecoverySubtitle.text = when {
             summary.taskCount == 1 && summary.singleTaskTitle != null ->
@@ -1623,9 +1671,23 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun dismissOverdueRecoveryCard() {
+        val today = LocalDate.now()
+        val summary = OverdueStepRecovery.collectSummary(homeTasksSnapshot, today)
+        overdueRecoveryLastAction = "keep_as_is"
+        overdueRecoveryLastStepCount = summary.stepCount
+        overdueRecoveryLastTaskCount = summary.taskCount
+        AppEventsApi.logAppEvent(
+            this,
+            "recovery_action_used",
+            metadata = JSONObject()
+                .put("action", "keep_as_is")
+                .put("affected_step_count", summary.stepCount)
+                .put("affected_task_count", summary.taskCount),
+        )
         overdueRecoveryKeepAsIsPending = true
         homeOverdueRecoveryCard.visibility = View.GONE
         overdueRecoveryUndoSnapshot = null
+        overdueRecoveryUndoDueSnapshot = null
         overdueRecoveryUndoWasDismissOnly = true
         showOverdueRecoveryUndoSnackbar(R.string.home_overdue_recovery_kept_as_is)
     }
@@ -1642,6 +1704,19 @@ class HomeActivity : AppCompatActivity() {
                 steps[ref.stepIndex].recommendedDate
         }
         return originalDates
+    }
+
+    private fun captureOverdueRecoverySimpleDueDates(): Map<String, LocalDateTime> {
+        val today = LocalDate.now()
+        val summary = OverdueStepRecovery.collectSummary(homeTasksSnapshot, today)
+        val originalDues = LinkedHashMap<String, LocalDateTime>()
+        for (ref in summary.steps) {
+            if (!ref.isSimple) continue
+            val task = homeTasksSnapshot.find { it.id == ref.taskId } ?: continue
+            val due = task.dueDate ?: continue
+            originalDues[ref.taskId] = due
+        }
+        return originalDues
     }
 
     private fun overdueRecoveryStepKey(taskId: String, stepIndex: Int): String = "$taskId|$stepIndex"
@@ -1691,24 +1766,29 @@ class HomeActivity : AppCompatActivity() {
     private fun dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded: Boolean) {
         overdueRecoverySnackbarDismissShouldFinalize = finalizeIfNeeded
         overdueRecoveryUndoSnackbar?.dismiss()
-        overdueRecoveryUndoSnackbar = null
+        if (!finalizeIfNeeded) {
+            overdueRecoveryUndoSnackbar = null
+        }
         overdueRecoverySnackbarDismissShouldFinalize = true
     }
 
     private fun clearOverdueRecoveryUndoState() {
         overdueRecoveryUndoSnapshot = null
+        overdueRecoveryUndoDueSnapshot = null
         overdueRecoveryUndoWasDismissOnly = false
         overdueRecoveryKeepAsIsPending = false
         overdueRecoveryUndoMessageRes = null
     }
 
     private fun hasPendingOverdueRecoveryUndo(): Boolean =
-        overdueRecoveryKeepAsIsPending || overdueRecoveryUndoSnapshot != null
+        overdueRecoveryKeepAsIsPending ||
+            overdueRecoveryUndoSnapshot != null ||
+            overdueRecoveryUndoDueSnapshot != null
 
     private fun maybeReshowOverdueRecoveryUndoSnackbar() {
         val messageRes = overdueRecoveryUndoMessageRes ?: return
         if (!hasPendingOverdueRecoveryUndo()) return
-        if (overdueRecoveryUndoSnackbar?.isShown == true) return
+        if (overdueRecoveryUndoSnackbar != null) return
         showOverdueRecoveryUndoSnackbar(messageRes, trackPending = false)
     }
 
@@ -1722,59 +1802,118 @@ class HomeActivity : AppCompatActivity() {
             .setAnchorView(findViewById(R.id.bottomNavBar))
             .addCallback(object : Snackbar.Callback() {
                 override fun onDismissed(transientBottomBar: Snackbar, event: Int) {
+                    overdueRecoveryUndoSnackbar = null
                     if (event == DISMISS_EVENT_ACTION) return
                     if (!overdueRecoverySnackbarDismissShouldFinalize) return
                     finalizeOverdueRecoveryWithoutUndo()
                 }
             })
+        attachOverdueRecoverySnackbarDismissButton(snackbar)
         overdueRecoveryUndoSnackbar = snackbar
         snackbar.show()
     }
 
+    private fun attachOverdueRecoverySnackbarDismissButton(snackbar: Snackbar) {
+        val contentLayout = snackbar.view.findViewById<View>(
+            com.google.android.material.R.id.snackbar_text,
+        )?.parent as? ViewGroup ?: return
+        val touchTarget = (48 * resources.displayMetrics.density).toInt()
+        val padding = (12 * resources.displayMetrics.density).toInt()
+        val closeButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_close)
+            contentDescription = getString(R.string.dismiss)
+            setPadding(padding, padding, padding, padding)
+            setOnClickListener {
+                dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = true)
+            }
+        }
+        contentLayout.addView(
+            closeButton,
+            LinearLayout.LayoutParams(touchTarget, touchTarget).apply {
+                gravity = Gravity.CENTER_VERTICAL
+            },
+        )
+    }
+
+    /** Pushes recovery roadmap/due patches sequentially; returns the first failure message or null. */
+    private fun patchOverdueRecoveryUpdates(
+        token: String,
+        roadmapUpdates: List<OverdueStepRecovery.TaskRoadmapUpdate>,
+        dueUpdates: List<OverdueStepRecovery.TaskDueUpdate>,
+    ): String? {
+        for (update in roadmapUpdates) {
+            when (val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)) {
+                is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
+                is SupabaseTasksApi.PatchRoadmapResult.Failure -> return result.message
+            }
+        }
+        for (update in dueUpdates) {
+            when (val result = SupabaseTasksApi.updateTaskDueDate(token, update.taskId, update.dueDate)) {
+                is SupabaseTasksApi.PatchDueResult.Success -> Unit
+                is SupabaseTasksApi.PatchDueResult.Failure -> return result.message
+            }
+        }
+        return null
+    }
+
     private fun undoOverdueRecoveryAction() {
         if (overdueRecoveryUndoWasDismissOnly) {
+            AppEventsApi.logAppEvent(
+                this,
+                "recovery_undo_used",
+                metadata = JSONObject()
+                    .put("original_action", overdueRecoveryLastAction ?: "keep_as_is")
+                    .put("affected_step_count", overdueRecoveryLastStepCount)
+                    .put("affected_task_count", overdueRecoveryLastTaskCount),
+            )
             dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = false)
             clearOverdueRecoveryUndoState()
             bindHomeTodayPlan(homeTasksSnapshot)
             return
         }
-        val originalDates = overdueRecoveryUndoSnapshot ?: return
-        if (originalDates.isEmpty()) return
+        val originalDates = overdueRecoveryUndoSnapshot.orEmpty()
+        val originalDues = overdueRecoveryUndoDueSnapshot.orEmpty()
+        if (originalDates.isEmpty() && originalDues.isEmpty()) return
+        AppEventsApi.logAppEvent(
+            this,
+            "recovery_undo_used",
+            metadata = JSONObject()
+                .put("original_action", overdueRecoveryLastAction ?: JSONObject.NULL)
+                .put("affected_step_count", overdueRecoveryLastStepCount)
+                .put("affected_task_count", overdueRecoveryLastTaskCount),
+        )
         val token = SessionManager.getAccessToken(this) ?: return
-        val updates = buildOverdueRecoveryRestoreUpdates(originalDates)
-        if (updates.isEmpty()) return
+        val roadmapUpdates =
+            if (originalDates.isEmpty()) emptyList() else buildOverdueRecoveryRestoreUpdates(originalDates)
+        val dueUpdates = originalDues.map { (taskId, due) ->
+            OverdueStepRecovery.TaskDueUpdate(taskId, due)
+        }
+        if (roadmapUpdates.isEmpty() && dueUpdates.isEmpty()) return
 
         dismissOverdueRecoveryUndoSnackbar(finalizeIfNeeded = false)
 
         val opGen = ++overdueRecoveryOperationGeneration
         homeRoadmapPatchInFlight = true
-        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates)
+        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, roadmapUpdates)
+        homeTasksSnapshot = OverdueStepRecovery.applyDueUpdatesToSnapshot(homeTasksSnapshot, dueUpdates)
         clearOverdueRecoveryUndoState()
         bindHomeTodayPlan(homeTasksSnapshot)
 
         networkExecutor.execute {
-            var failureMessage: String? = null
-            for (update in updates) {
-                when (
-                    val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)
-                ) {
-                    is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
-                    is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
-                        failureMessage = result.message
-                        break
-                    }
-                }
-            }
+            val failureMessage = patchOverdueRecoveryUpdates(token, roadmapUpdates, dueUpdates)
             runOnUiThread {
                 homeRoadmapPatchInFlight = false
                 if (isFinishing || opGen != overdueRecoveryOperationGeneration) return@runOnUiThread
                 if (failureMessage != null) {
                     Toast.makeText(
                         this,
-                        getString(R.string.home_overdue_recovery_failed, failureMessage),
+                        R.string.home_overdue_recovery_undo_failed,
                         Toast.LENGTH_LONG,
                     ).show()
                     loadHomeUpcoming(showLoading = false)
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
                 } else {
                     loadHomeUpcoming(showLoading = false)
                     if (currentTab == Tab.Tasks) {
@@ -1789,12 +1928,30 @@ class HomeActivity : AppCompatActivity() {
         if (homeRoadmapPatchInFlight) return
         val token = SessionManager.getAccessToken(this) ?: return
         val today = LocalDate.now()
+        val summary = OverdueStepRecovery.collectSummary(homeTasksSnapshot, today)
+        val action = when (mode) {
+            OverdueStepRecovery.RescheduleMode.ADD_TO_TODAY -> "add_to_today"
+            OverdueStepRecovery.RescheduleMode.SPREAD_OUT -> "spread_out"
+        }
+        overdueRecoveryLastAction = action
+        overdueRecoveryLastStepCount = summary.stepCount
+        overdueRecoveryLastTaskCount = summary.taskCount
+        AppEventsApi.logAppEvent(
+            this,
+            "recovery_action_used",
+            metadata = JSONObject()
+                .put("action", action)
+                .put("affected_step_count", summary.stepCount)
+                .put("affected_task_count", summary.taskCount),
+        )
         val updates = OverdueStepRecovery.buildUpdates(homeTasksSnapshot, today, mode)
-        if (updates.isEmpty()) return
+        if (updates.isEmpty) return
 
         val undoSnapshot = captureOverdueRecoveryOriginalDates()
+        val undoDueSnapshot = captureOverdueRecoverySimpleDueDates()
         val opGen = ++overdueRecoveryOperationGeneration
         overdueRecoveryUndoSnapshot = undoSnapshot
+        overdueRecoveryUndoDueSnapshot = undoDueSnapshot
         overdueRecoveryUndoWasDismissOnly = false
 
         homeRoadmapPatchInFlight = true
@@ -1802,7 +1959,8 @@ class HomeActivity : AppCompatActivity() {
         homeOverdueRecoverySpreadOut.isEnabled = false
         homeOverdueRecoveryKeepAsIs.isEnabled = false
 
-        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates)
+        homeTasksSnapshot = OverdueStepRecovery.applyUpdatesToSnapshot(homeTasksSnapshot, updates.roadmapUpdates)
+        homeTasksSnapshot = OverdueStepRecovery.applyDueUpdatesToSnapshot(homeTasksSnapshot, updates.dueUpdates)
         bindHomeTodayPlan(homeTasksSnapshot)
 
         val confirmationRes = when (mode) {
@@ -1812,18 +1970,7 @@ class HomeActivity : AppCompatActivity() {
         showOverdueRecoveryUndoSnackbar(confirmationRes)
 
         networkExecutor.execute {
-            var failureMessage: String? = null
-            for (update in updates) {
-                when (
-                    val result = SupabaseTasksApi.updateTaskRoadmap(token, update.taskId, update.roadmap)
-                ) {
-                    is SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
-                    is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
-                        failureMessage = result.message
-                        break
-                    }
-                }
-            }
+            val failureMessage = patchOverdueRecoveryUpdates(token, updates.roadmapUpdates, updates.dueUpdates)
             runOnUiThread {
                 homeRoadmapPatchInFlight = false
                 if (isFinishing || opGen != overdueRecoveryOperationGeneration) return@runOnUiThread
@@ -1886,6 +2033,7 @@ class HomeActivity : AppCompatActivity() {
         }
 
         homeTodayPlanAdjustmentCard.visibility = View.VISIBLE
+        maybeLogAdjustTodayOpened(workEntries, selectedMinutes)
         homeTodayPlanAdjustmentSummary.text = getString(
             R.string.home_today_plan_adjustment_over_budget,
             formatPlanHoursLabel(plan.plannedHours),
@@ -1967,6 +2115,7 @@ class HomeActivity : AppCompatActivity() {
         if (todayPlanAdjustmentSuppressChipCallback) return
         TodayPlanTimeLimitStore.setAvailableMinutes(this, minutes)
         todayPlanAdjustmentDismissed = false
+        maybeLogAdjustTodayOpened(todayPlanWorkEntries(homeTasksSnapshot, LocalDate.now()), minutes)
         updateTodayPlanTimeLimitChipSelection(minutes)
         bindHomeTodayPlan(homeTasksSnapshot)
     }
@@ -1976,6 +2125,8 @@ class HomeActivity : AppCompatActivity() {
         TodayPlanTimeLimitStore.clear(this)
         todayPlanAdjustmentDismissed = false
         todayPlanAdjustmentCachedPlan = null
+        adjustTodayOpenedLogged = false
+        adjustTodayLastMovedStepCount = 0
         dismissTodayPlanAdjustmentUndoSnackbar(finalize = true)
         updateTodayPlanTimeLimitChipSelection(null)
         bindHomeTodayPlan(homeTasksSnapshot)
@@ -2007,6 +2158,18 @@ class HomeActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun maybeLogAdjustTodayOpened(workEntries: List<TodayPlanEntry>, selectedMinutes: Int?) {
+        if (adjustTodayOpenedLogged || selectedMinutes == null) return
+        adjustTodayOpenedLogged = true
+        AppEventsApi.logAppEvent(
+            this,
+            "adjust_today_opened",
+            metadata = JSONObject()
+                .put("planned_minutes_today", selectedMinutes)
+                .put("incomplete_step_count_today", workEntries.count { !it.isCompleted }),
+        )
+    }
+
     private fun dismissTodayPlanAdjustmentCard() {
         todayPlanAdjustmentDismissed = true
         homeTodayPlanAdjustmentCard.visibility = View.GONE
@@ -2028,6 +2191,17 @@ class HomeActivity : AppCompatActivity() {
         val opGen = ++todayPlanAdjustmentOperationGeneration
         todayPlanAdjustmentUndoSnapshot = undoSnapshot
         todayPlanAdjustmentDismissed = true
+        adjustTodayLastMovedStepCount = plan.moveLater.size
+
+        AppEventsApi.logAppEvent(
+            this,
+            "adjust_today_applied",
+            metadata = JSONObject()
+                .put("available_minutes", (plan.availableHours * 60.0).roundToInt())
+                .put("original_planned_minutes", (plan.plannedHours * 60.0).roundToInt())
+                .put("kept_step_count", plan.recommendedFocus.size)
+                .put("moved_step_count", plan.moveLater.size),
+        )
 
         homeRoadmapPatchInFlight = true
         homeTodayPlanAdjustmentApply.isEnabled = false
@@ -2111,6 +2285,14 @@ class HomeActivity : AppCompatActivity() {
         val updates = TodayPlanAdjustment.buildRestoreUpdates(originalDates, homeTasksSnapshot)
         if (updates.isEmpty()) return
 
+        AppEventsApi.logAppEvent(
+            this,
+            "adjust_today_undo_used",
+            metadata = JSONObject()
+                .put("moved_step_count", adjustTodayLastMovedStepCount)
+                .put("restored_step_count", originalDates.size),
+        )
+
         dismissTodayPlanAdjustmentUndoSnackbar(finalize = false)
         val opGen = ++todayPlanAdjustmentOperationGeneration
         homeRoadmapPatchInFlight = true
@@ -2136,10 +2318,13 @@ class HomeActivity : AppCompatActivity() {
                 if (failureMessage != null) {
                     Toast.makeText(
                         this,
-                        getString(R.string.home_today_plan_adjustment_failed, failureMessage),
+                        R.string.home_today_plan_adjustment_undo_failed,
                         Toast.LENGTH_LONG,
                     ).show()
                     loadHomeUpcoming(showLoading = false)
+                    if (currentTab == Tab.Tasks) {
+                        loadTasks(showLoading = false)
+                    }
                 } else {
                     loadHomeUpcoming(showLoading = false)
                     if (currentTab == Tab.Tasks) {
@@ -2262,6 +2447,14 @@ class HomeActivity : AppCompatActivity() {
         homeWeekAheadSection.visibility = View.VISIBLE
         val today = LocalDate.now()
         val summary = WeekAheadWork.computeSummary(activeTasks, today)
+        if (!weekAheadViewedLogged) {
+            weekAheadViewedLogged = true
+            val metadata = JSONObject()
+                .put("tasks_due_count", summary.tasksDueCount)
+                .put("planned_hours", summary.totalPlannedHours)
+            summary.busiestDay?.let { metadata.put("busiest_day", it.toString()) }
+            AppEventsApi.logAppEvent(this, "week_ahead_viewed", metadata = metadata)
+        }
         val tasksDuePhrase = resources.getQuantityString(
             R.plurals.home_week_ahead_tasks_due,
             summary.tasksDueCount,
@@ -2382,6 +2575,10 @@ class HomeActivity : AppCompatActivity() {
         } else {
             homeTodayPlanPinnedCheckedKeys.remove(pinKey)
             homeGetAheadPinnedCheckedKeys.remove(pinKey)
+        }
+
+        if (checked) {
+            logSimpleTaskStepCompleted(token, task)
         }
 
         homeRoadmapPatchInFlight = true
@@ -2517,10 +2714,25 @@ class HomeActivity : AppCompatActivity() {
         }
         homeRoadmapPatchInFlight = true
         estimateFeedbackAnsweredKeys.remove(estimateFeedbackKey(taskId, stepIndex))
+        val completedStep = steps[stepIndex]
         steps[stepIndex] = steps[stepIndex].copy(
             completed = checked,
             completedAt = if (checked) Instant.now().toString() else null,
         )
+        if (checked) {
+            AppEventsApi.logAppEvent(
+                accessToken = token,
+                eventName = "step_completed",
+                taskId = taskId,
+                courseId = task.courseId,
+                metadata = JSONObject()
+                    .put("step_index", stepIndex)
+                    .put("step_title", completedStep.title)
+                    .put("estimated_hours", completedStep.estimatedHours ?: JSONObject.NULL)
+                    .put("recommended_date", completedStep.recommendedDate.ifBlank { JSONObject.NULL })
+                    .put("completed_late", rec != null && rec.isBefore(today)),
+            )
+        }
         val previousStatus = task.status
         val derived = deriveStatusFromSteps(steps)
         val newRoadmap = RoadmapStep.toJsonArray(steps)
@@ -2618,16 +2830,25 @@ class HomeActivity : AppCompatActivity() {
                 )
             ) {
                 is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Failure -> runOnUiThread {
-                    estimateFeedbackAnsweredKeys.remove(key)
                     if (isFinishing) return@runOnUiThread
-                    bindHomeTodayPlan(homeTasksSnapshot)
                     Toast.makeText(
                         this,
-                        getString(R.string.roadmap_estimate_feedback_save_failed) + "\n" + result.message,
-                        Toast.LENGTH_LONG,
+                        R.string.roadmap_estimate_feedback_save_failed,
+                        Toast.LENGTH_SHORT,
                     ).show()
                 }
-                is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Success -> Unit
+                is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Success ->
+                    AppEventsApi.logAppEvent(
+                        accessToken = token,
+                        eventName = "estimate_feedback_submitted",
+                        taskId = taskId,
+                        courseId = task.courseId,
+                        metadata = JSONObject()
+                            .put("step_index", stepIndex)
+                            .put("step_title", step.title)
+                            .put("estimated_hours", step.estimatedHours ?: JSONObject.NULL)
+                            .put("feedback", normalized),
+                    )
             }
         }
     }
@@ -2958,6 +3179,23 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
+    private fun logSimpleTaskStepCompleted(accessToken: String, task: SupabaseTasksApi.TaskRow) {
+        val today = LocalDate.now()
+        val planOn = TodayPlanWork.simpleTaskPlanLocalDate(task)
+        AppEventsApi.logAppEvent(
+            accessToken = accessToken,
+            eventName = "step_completed",
+            taskId = task.id,
+            courseId = task.courseId,
+            metadata = JSONObject()
+                .put("step_index", TodayPlanEntry.SIMPLE_STEP_INDEX)
+                .put("step_title", task.title)
+                .put("estimated_hours", TodayPlanWork.SIMPLE_TASK_HOURS)
+                .put("recommended_date", planOn?.toString() ?: JSONObject.NULL)
+                .put("completed_late", planOn != null && planOn.isBefore(today)),
+        )
+    }
+
     private fun openTaskDetail(task: SupabaseTasksApi.TaskRow) {
         openTaskDetailLauncher.launch(TaskDetailActivity.createIntent(this, task))
     }
@@ -2975,6 +3213,7 @@ class HomeActivity : AppCompatActivity() {
         val today = LocalDate.now()
         val isFuturePlan = planOn != null && planOn.isAfter(today)
         if (checked) {
+            logSimpleTaskStepCompleted(token, task)
             if (isFuturePlan) {
                 homeGetAheadPinnedCheckedKeys.add(pinKey)
             } else if (planOn != null && !planOn.isAfter(today)) {
@@ -3079,5 +3318,8 @@ class HomeActivity : AppCompatActivity() {
         const val TAB_HOME = "home"
         const val TAB_TASKS = "tasks"
         const val TAB_PROFILE = "profile"
+
+        /** Ensures `app_opened` is logged only once per app process/session, not on every recreation. */
+        private var appOpenedLogged = false
     }
 }

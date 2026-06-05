@@ -22,6 +22,7 @@ import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import org.json.JSONArray
+import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -374,8 +375,30 @@ class TaskDetailActivity : AppCompatActivity() {
     private fun onSimpleTaskCompleteToggled(checked: Boolean) {
         val targetStatus = if (checked) TaskStatus.COMPLETE else TaskStatus.NOT_STARTED
         if (targetStatus == savedStatus) return
+        if (checked) {
+            SessionManager.getAccessToken(this)?.let { token ->
+                currentTaskRow?.let { task -> logSimpleTaskStepCompleted(token, task) }
+            }
+        }
         simpleCompleteCheck.isEnabled = false
         persistSimpleTaskStatus(targetStatus)
+    }
+
+    private fun logSimpleTaskStepCompleted(accessToken: String, task: SupabaseTasksApi.TaskRow) {
+        val today = LocalDate.now()
+        val planOn = TodayPlanWork.simpleTaskPlanLocalDate(task)
+        AppEventsApi.logAppEvent(
+            accessToken = accessToken,
+            eventName = "step_completed",
+            taskId = task.id,
+            courseId = task.courseId,
+            metadata = JSONObject()
+                .put("step_index", TodayPlanEntry.SIMPLE_STEP_INDEX)
+                .put("step_title", task.title)
+                .put("estimated_hours", TodayPlanWork.SIMPLE_TASK_HOURS)
+                .put("recommended_date", planOn?.toString() ?: JSONObject.NULL)
+                .put("completed_late", planOn != null && planOn.isBefore(today)),
+        )
     }
 
     private fun persistSimpleTaskStatus(status: TaskStatus) {
@@ -491,6 +514,20 @@ class TaskDetailActivity : AppCompatActivity() {
 
         val token = SessionManager.getAccessToken(this)
         val userId = token?.let { achievementsUserId ?: SupabaseUserId.resolveUserId(it) }
+        if (token != null && checked) {
+            AppEventsApi.logAppEvent(
+                accessToken = token,
+                eventName = "step_completed",
+                taskId = taskId,
+                courseId = currentTaskRow?.courseId,
+                metadata = JSONObject()
+                    .put("step_index", index)
+                    .put("step_title", cur.title)
+                    .put("estimated_hours", cur.estimatedHours ?: JSONObject.NULL)
+                    .put("recommended_date", cur.recommendedDate.ifBlank { JSONObject.NULL })
+                    .put("completed_late", RoadmapStep.recommendedLocalDate(cur)?.isBefore(today) == true),
+            )
+        }
         if (token != null && userId != null && checked) {
             AchievementManager.ensureLoaded(token, userId)
             val rec = RoadmapStep.recommendedLocalDate(cur)
@@ -541,16 +578,25 @@ class TaskDetailActivity : AppCompatActivity() {
                 )
             ) {
                 is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Failure -> runOnUiThread {
-                    estimateFeedbackAnsweredStepIndices.remove(index)
                     if (isFinishing) return@runOnUiThread
-                    roadmapAdapter.submitList(roadmapSteps.toList())
                     Toast.makeText(
                         this,
-                        getString(R.string.roadmap_estimate_feedback_save_failed) + "\n" + result.message,
-                        Toast.LENGTH_LONG,
+                        R.string.roadmap_estimate_feedback_save_failed,
+                        Toast.LENGTH_SHORT,
                     ).show()
                 }
-                is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Success -> Unit
+                is SupabaseRoadmapStepEstimateFeedbackApi.UpsertResult.Success ->
+                    AppEventsApi.logAppEvent(
+                        accessToken = token,
+                        eventName = "estimate_feedback_submitted",
+                        taskId = task.id,
+                        courseId = task.courseId,
+                        metadata = JSONObject()
+                            .put("step_index", index)
+                            .put("step_title", step.title)
+                            .put("estimated_hours", step.estimatedHours ?: JSONObject.NULL)
+                            .put("feedback", normalized),
+                    )
             }
         }
     }

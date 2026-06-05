@@ -11,6 +11,7 @@ import java.time.ZoneId
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Runs course and task creation after the user leaves the create screen.
@@ -75,6 +76,17 @@ object BackgroundCreateJobs {
                         isEdit = false,
                     )
                     val profileSyncFailed = profileSync is CourseProfileCoordinator.SyncResult.Failure
+                    AppEventsApi.logAppEvent(
+                        accessToken = accessToken,
+                        eventName = "course_created",
+                        courseId = savedCourse.id,
+                        metadata = JSONObject()
+                            .put("has_syllabus", !savedCourse.syllabus.isNullOrBlank())
+                            .put("has_document", docUri != null)
+                            .put("has_photo", photoUri != null)
+                            .put("level", savedCourse.level)
+                            .put("course_profile_sync_failed", profileSyncFailed),
+                    )
                     notifyCourseCreateSucceeded(profileSyncFailed)
                 }
             }
@@ -111,6 +123,24 @@ object BackgroundCreateJobs {
                     notifyTaskCreateFailed(insertResult.message)
                 is SupabaseTasksApi.InsertResult.Success -> {
                     if (!creatingComplex) {
+                        val simpleTaskId = insertResult.id
+                        AppEventsApi.logAppEvent(
+                            accessToken = accessToken,
+                            eventName = "task_created",
+                            taskId = simpleTaskId,
+                            courseId = selectedCourseId,
+                            metadata = JSONObject()
+                                .put("task_kind", "simple")
+                                .put("has_course", !selectedCourseId.isNullOrBlank())
+                                .put("has_due_date", true)
+                                .put("has_roadmap", false),
+                        )
+                        AppEventsApi.logAppEvent(
+                            accessToken = accessToken,
+                            eventName = "simple_task_created",
+                            taskId = simpleTaskId,
+                            courseId = selectedCourseId,
+                        )
                         notifyTaskCreateSucceeded()
                         return@execute
                     }
@@ -155,6 +185,9 @@ object BackgroundCreateJobs {
                     val dueDate = due.toLocalDate()
                     val existingWorkload = ExistingWorkload.loadForRange(accessToken, today, dueDate)
 
+                    var roadmapFailureMessage: String? = null
+                    var roadmapFailureKind = SupabaseEdgeFunctionsApi.RoadmapResult.FailureKind.GENERATION
+                    var roadmapTotalEstimatedHours: Double? = null
                     val roadmapSteps = when (
                         val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
@@ -174,12 +207,23 @@ object BackgroundCreateJobs {
                             existingWorkload = existingWorkload,
                         )
                     ) {
-                        is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps
+                        is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> {
+                            roadmapTotalEstimatedHours = roadmapResult.totalEstimatedHours
+                            roadmapResult.steps
+                        }
                         is SupabaseEdgeFunctionsApi.RoadmapResult.Failure -> {
                             Log.e(LOG_TAG, "Roadmap generation failed.\n${roadmapResult.message}")
+                            roadmapFailureMessage = roadmapResult.message
+                            roadmapFailureKind = roadmapResult.kind
                             JSONArray()
                         }
                     }
+
+                    val hasDocument = !documentContent.isNullOrBlank()
+                    val hasPhoto = !photoText.isNullOrBlank()
+                    val hasRequirements = !requirements.isNullOrBlank()
+                    val hasCourseProfile = !courseContext.third.isNullOrBlank()
+                    var roadmapSaved = false
 
                     if (roadmapSteps.length() == 0) {
                         when (
@@ -195,9 +239,30 @@ object BackgroundCreateJobs {
                             )
                             SupabaseTasksApi.PatchRoadmapResult.Success -> Unit
                         }
+                        val errorType = when (roadmapFailureKind) {
+                            SupabaseEdgeFunctionsApi.RoadmapResult.FailureKind.INCOMPLETE_RESPONSE ->
+                                "incomplete_response"
+                            SupabaseEdgeFunctionsApi.RoadmapResult.FailureKind.GENERATION ->
+                                if (roadmapFailureMessage != null) "generation_failed" else "empty_roadmap"
+                        }
+                        AppEventsApi.logAppEvent(
+                            accessToken = accessToken,
+                            eventName = "roadmap_generation_failed",
+                            taskId = taskId,
+                            courseId = selectedCourseId,
+                            metadata = JSONObject()
+                                .put("error_type", errorType)
+                                .put("error_message", AppEventsApi.shortenError(roadmapFailureMessage)),
+                        )
+                        val noticeMessage = when (roadmapFailureKind) {
+                            SupabaseEdgeFunctionsApi.RoadmapResult.FailureKind.INCOMPLETE_RESPONSE ->
+                                appContext.getString(R.string.roadmap_response_incomplete)
+                            SupabaseEdgeFunctionsApi.RoadmapResult.FailureKind.GENERATION ->
+                                appContext.getString(R.string.roadmap_generation_failed)
+                        }
                         notifyTaskCreateNotice(
-                            title = appContext.getString(R.string.add_task_complex_fallback_title),
-                            message = appContext.getString(R.string.add_task_complex_fallback_message),
+                            title = "",
+                            message = noticeMessage,
                         )
                     } else {
                         when (
@@ -208,15 +273,62 @@ object BackgroundCreateJobs {
                                 roadmapConfidence = roadmapConfidence,
                             )
                         ) {
-                            is SupabaseTasksApi.PatchRoadmapResult.Failure ->
+                            is SupabaseTasksApi.PatchRoadmapResult.Failure -> {
+                                Log.e(LOG_TAG, "Could not save roadmap.\n${patchResult.message}")
                                 notifyTaskCreateNotice(
-                                    title = "Could not save roadmap",
-                                    message = patchResult.message,
+                                    title = "",
+                                    message = appContext.getString(R.string.roadmap_generation_failed),
                                 )
-                            SupabaseTasksApi.PatchRoadmapResult.Success ->
+                                AppEventsApi.logAppEvent(
+                                    accessToken = accessToken,
+                                    eventName = "roadmap_generation_failed",
+                                    taskId = taskId,
+                                    courseId = selectedCourseId,
+                                    metadata = JSONObject()
+                                        .put("error_type", "save_failed")
+                                        .put("error_message", AppEventsApi.shortenError(patchResult.message)),
+                                )
+                            }
+                            SupabaseTasksApi.PatchRoadmapResult.Success -> {
+                                roadmapSaved = true
                                 Log.d(LOG_TAG, "Roadmap saved for taskId=$taskId steps=${roadmapSteps.length()}")
+                                val totalEstimatedHours = roadmapTotalEstimatedHours
+                                    ?: RoadmapStep.parseList(roadmapSteps).sumOf { it.estimatedHours ?: 0.0 }
+                                AppEventsApi.logAppEvent(
+                                    accessToken = accessToken,
+                                    eventName = "roadmap_generated",
+                                    taskId = taskId,
+                                    courseId = selectedCourseId,
+                                    metadata = JSONObject()
+                                        .put("step_count", roadmapSteps.length())
+                                        .put("total_estimated_hours", totalEstimatedHours)
+                                        .put("roadmap_confidence", roadmapConfidence.apiValue)
+                                        .put("has_document", hasDocument)
+                                        .put("has_photo", hasPhoto)
+                                        .put("has_requirements", hasRequirements)
+                                        .put("has_course_profile", hasCourseProfile),
+                                )
+                            }
                         }
                     }
+
+                    AppEventsApi.logAppEvent(
+                        accessToken = accessToken,
+                        eventName = "task_created",
+                        taskId = taskId,
+                        courseId = selectedCourseId,
+                        metadata = JSONObject()
+                            .put("task_kind", "complex")
+                            .put("has_course", !selectedCourseId.isNullOrBlank())
+                            .put("has_due_date", true)
+                            .put("has_roadmap", roadmapSaved),
+                    )
+                    AppEventsApi.logAppEvent(
+                        accessToken = accessToken,
+                        eventName = "complex_task_created",
+                        taskId = taskId,
+                        courseId = selectedCourseId,
+                    )
 
                     notifyTaskCreateSucceeded()
                 }

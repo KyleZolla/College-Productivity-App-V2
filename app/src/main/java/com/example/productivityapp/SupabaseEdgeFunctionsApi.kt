@@ -15,8 +15,16 @@ object SupabaseEdgeFunctionsApi {
     private const val FALLBACK_ROADMAP_FUNCTION_SLUG = "get_roadmap"
 
     sealed class RoadmapResult {
-        data class Success(val steps: JSONArray) : RoadmapResult()
-        data class Failure(val message: String) : RoadmapResult()
+        data class Success(val steps: JSONArray, val totalEstimatedHours: Double) : RoadmapResult()
+        data class Failure(
+            val message: String,
+            val kind: FailureKind = FailureKind.GENERATION,
+        ) : RoadmapResult()
+
+        enum class FailureKind {
+            GENERATION,
+            INCOMPLETE_RESPONSE,
+        }
     }
 
     sealed class CourseProfileResult {
@@ -237,13 +245,20 @@ object SupabaseEdgeFunctionsApi {
                 return RoadmapResult.Failure(msg)
             }
 
-            val steps = parseSteps(responseBody) ?: run {
+            val parsed = parseRoadmapResponse(responseBody) ?: run {
                 val snippet = responseBody.trim().take(800)
                 return RoadmapResult.Failure(
-                    "200 OK at $url but response did not contain steps.\n\nBody snippet:\n$snippet"
+                    "200 OK at $url but response did not contain steps.\n\nBody snippet:\n$snippet",
+                    RoadmapResult.FailureKind.INCOMPLETE_RESPONSE,
                 )
             }
-            RoadmapResult.Success(steps)
+            if (!GeneratedRoadmapValidator.validate(parsed.steps, parsed.totalEstimatedHours)) {
+                return RoadmapResult.Failure(
+                    "Roadmap response missing required fields.",
+                    RoadmapResult.FailureKind.INCOMPLETE_RESPONSE,
+                )
+            }
+            RoadmapResult.Success(parsed.steps, parsed.totalEstimatedHours!!)
         } catch (e: Exception) {
             val msg = e.message ?: "Network error."
             Log.e("SupabaseEdgeFunctionsApi", msg, e)
@@ -251,15 +266,20 @@ object SupabaseEdgeFunctionsApi {
         }
     }
 
-    private fun parseSteps(body: String): JSONArray? {
+    private data class ParsedRoadmapResponse(
+        val steps: JSONArray,
+        val totalEstimatedHours: Double?,
+    )
+
+    private fun parseRoadmapResponse(body: String): ParsedRoadmapResponse? {
         val trimmed = body.trim()
         if (trimmed.isEmpty()) return null
         return try {
             when {
-                trimmed.startsWith("[") -> JSONArray(trimmed)
+                trimmed.startsWith("[") -> ParsedRoadmapResponse(JSONArray(trimmed), null)
                 trimmed.startsWith("{") -> {
                     val obj = JSONObject(trimmed)
-                    when {
+                    val steps = when {
                         obj.has("steps") && !obj.isNull("steps") -> obj.optJSONArray("steps")
                         obj.has("data") && !obj.isNull("data") -> {
                             val data = obj.opt("data")
@@ -270,13 +290,29 @@ object SupabaseEdgeFunctionsApi {
                             }
                         }
                         else -> null
-                    }
+                    } ?: return null
+                    val totalHours = parseTotalEstimatedHours(obj)
+                    ParsedRoadmapResponse(steps, totalHours)
                 }
                 else -> null
             }
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun parseTotalEstimatedHours(obj: JSONObject): Double? {
+        val candidates = listOf("totalEstimatedHours", "total_estimated_hours")
+        for (key in candidates) {
+            if (!obj.has(key) || obj.isNull(key)) continue
+            val value = obj.optDouble(key)
+            if (!value.isNaN()) return value
+        }
+        if (obj.has("data") && !obj.isNull("data")) {
+            val data = obj.opt("data")
+            if (data is JSONObject) return parseTotalEstimatedHours(data)
+        }
+        return null
     }
 
     private fun parseError(body: String, code: Int): String {

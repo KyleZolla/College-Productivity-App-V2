@@ -21,6 +21,8 @@ object OverdueStepRecovery {
         val taskId: String,
         val taskTitle: String,
         val stepIndex: Int,
+        /** True for simple (roadmap-less) tasks rescheduled by moving their due date. */
+        val isSimple: Boolean = false,
     )
 
     data class Summary(
@@ -37,6 +39,20 @@ object OverdueStepRecovery {
         val roadmap: JSONArray,
     )
 
+    /** Reschedules a simple task by moving its due date (its plan day is derived from the due date). */
+    data class TaskDueUpdate(
+        val taskId: String,
+        val dueDate: LocalDateTime,
+    )
+
+    /** Combined output of a reschedule: roadmap-step moves for complex tasks, due-date moves for simple ones. */
+    data class RescheduleUpdates(
+        val roadmapUpdates: List<TaskRoadmapUpdate>,
+        val dueUpdates: List<TaskDueUpdate>,
+    ) {
+        val isEmpty: Boolean get() = roadmapUpdates.isEmpty() && dueUpdates.isEmpty()
+    }
+
     enum class RescheduleMode { ADD_TO_TODAY, SPREAD_OUT }
 
     fun collectSummary(
@@ -45,8 +61,21 @@ object OverdueStepRecovery {
     ): Summary {
         val steps = ArrayList<OverdueStepRef>()
         for (task in tasks) {
-            if (TaskKind.isSimpleTask(task)) continue
             if (task.status == TaskStatus.COMPLETE) continue
+            if (TaskKind.isSimpleTask(task)) {
+                val planOn = TodayPlanWork.simpleTaskPlanLocalDate(task) ?: continue
+                if (planOn.isBefore(today)) {
+                    steps.add(
+                        OverdueStepRef(
+                            taskId = task.id,
+                            taskTitle = task.title,
+                            stepIndex = TodayPlanEntry.SIMPLE_STEP_INDEX,
+                            isSimple = true,
+                        ),
+                    )
+                }
+                continue
+            }
             val roadmapSteps = RoadmapStep.parseList(task.roadmap)
             roadmapSteps.forEachIndexed { index, step ->
                 if (step.completed) return@forEachIndexed
@@ -69,13 +98,14 @@ object OverdueStepRecovery {
         tasks: List<SupabaseTasksApi.TaskRow>,
         today: LocalDate,
         mode: RescheduleMode,
-    ): List<TaskRoadmapUpdate> {
+    ): RescheduleUpdates {
         val summary = collectSummary(tasks, today)
-        if (summary.steps.isEmpty()) return emptyList()
+        if (summary.steps.isEmpty()) return RescheduleUpdates(emptyList(), emptyList())
 
-        val stepsByTask = summary.steps.groupBy { it.taskId }
-        val updates = ArrayList<TaskRoadmapUpdate>()
-        for ((taskId, refs) in stepsByTask) {
+        val (simpleRefs, roadmapRefs) = summary.steps.partition { it.isSimple }
+
+        val roadmapUpdates = ArrayList<TaskRoadmapUpdate>()
+        for ((taskId, refs) in roadmapRefs.groupBy { it.taskId }) {
             val task = tasks.find { it.id == taskId } ?: continue
             val roadmapSteps = RoadmapStep.parseList(task.roadmap).toMutableList()
             val overdueIndices = refs
@@ -90,9 +120,18 @@ object OverdueStepRecovery {
                     taskDueDateTime = task.dueDate,
                 )
             }
-            updates.add(TaskRoadmapUpdate(taskId, RoadmapStep.toJsonArray(rescheduled)))
+            roadmapUpdates.add(TaskRoadmapUpdate(taskId, RoadmapStep.toJsonArray(rescheduled)))
         }
-        return updates
+
+        // Simple tasks have no separate work date, so both modes simply move them onto today's plan.
+        val dueUpdates = ArrayList<TaskDueUpdate>()
+        for (ref in simpleRefs) {
+            val task = tasks.find { it.id == ref.taskId } ?: continue
+            val newDue = TodayPlanWork.simpleTaskDueForPlanDay(task, today) ?: continue
+            dueUpdates.add(TaskDueUpdate(ref.taskId, newDue))
+        }
+
+        return RescheduleUpdates(roadmapUpdates, dueUpdates)
     }
 
     fun applyUpdatesToSnapshot(
@@ -104,6 +143,18 @@ object OverdueStepRecovery {
         return tasks.map { task ->
             val update = byId[task.id] ?: return@map task
             task.copy(roadmap = update.roadmap)
+        }
+    }
+
+    fun applyDueUpdatesToSnapshot(
+        tasks: List<SupabaseTasksApi.TaskRow>,
+        updates: List<TaskDueUpdate>,
+    ): List<SupabaseTasksApi.TaskRow> {
+        if (updates.isEmpty()) return tasks
+        val byId = updates.associateBy { it.taskId }
+        return tasks.map { task ->
+            val update = byId[task.id] ?: return@map task
+            task.copy(dueDate = update.dueDate)
         }
     }
 

@@ -74,8 +74,10 @@
     <string name="home_overdue_recovery_added_to_today">Added unfinished steps to today\'s plan.</string>
     <string name="home_overdue_recovery_spread_out_done">Updated your plan.</string>
     <string name="home_overdue_recovery_failed">Couldn\'t update your plan.\n%1$s</string>
+    <string name="home_overdue_recovery_undo_failed">Couldn\u2019t undo recovery. Please refresh and try again.</string>
     <string name="home_overdue_recovery_kept_as_is">Keeping your current schedule.</string>
     <string name="undo">Undo</string>
+    <string name="dismiss">Dismiss</string>
     <string name="home_today_plan_label">Today\'s plan</string>
     <string name="home_today_plan_empty_ahead">Nothing scheduled for today — you\'re ahead!</string>
     <string name="home_today_plan_review_title_today">Today</string>
@@ -127,6 +129,7 @@
     <string name="home_today_plan_adjustment_applied">Updated today\u2019s plan.</string>
     <string name="home_today_plan_adjustment_acknowledged">Today\u2019s plan accepted.</string>
     <string name="home_today_plan_adjustment_failed">Couldn\u2019t update today\u2019s plan.\n%1$s</string>
+    <string name="home_today_plan_adjustment_undo_failed">Couldn\u2019t undo changes. Please refresh and try again.</string>
     <string name="home_greet_morning">Good morning, %1$s 👋</string>
     <string name="home_greet_afternoon">Good afternoon, %1$s 👋</string>
     <string name="home_greet_evening">Good evening, %1$s 👋</string>
@@ -156,6 +159,8 @@
     <string name="add_task_type_complex">Complex</string>
     <string name="add_task_complex_fallback_message">Not enough information to build a roadmap. This task was saved as a simple task — you can mark it complete with a checkbox.</string>
     <string name="add_task_complex_fallback_title">Saved as simple task</string>
+    <string name="roadmap_generation_failed">Couldn\u2019t generate roadmap. Please try again.</string>
+    <string name="roadmap_response_incomplete">The roadmap response was incomplete. Please try again.</string>
     <string name="task_detail_mark_complete">Mark complete</string>
     <string name="task_detail_roadmap_confidence">Roadmap confidence: %1$s</string>
     <string name="task_detail_roadmap_confidence_low_hint">Add instructions for a better roadmap.</string>
@@ -247,7 +252,7 @@
     <string name="roadmap_estimate_feedback_too_short">Too short</string>
     <string name="roadmap_estimate_feedback_about_right">About right</string>
     <string name="roadmap_estimate_feedback_too_long">Too long</string>
-    <string name="roadmap_estimate_feedback_save_failed">Could not save time estimate feedback.</string>
+    <string name="roadmap_estimate_feedback_save_failed">Couldn\u2019t save feedback.</string>
     <string name="roadmap_step_detail_description_label">What to do</string>
     <string name="roadmap_step_detail_no_description">No description for this step.</string>
     <string name="roadmap_step_detail_recommended">Recommended: %1$s</string>

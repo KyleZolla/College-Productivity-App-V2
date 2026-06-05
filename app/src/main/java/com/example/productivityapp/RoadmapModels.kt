@@ -153,6 +153,39 @@ data class RoadmapStep(
     }
 }
 
+/** Validates a freshly generated roadmap before it is persisted. */
+object GeneratedRoadmapValidator {
+
+    fun validate(steps: JSONArray, totalEstimatedHours: Double?): Boolean {
+        if (totalEstimatedHours == null || totalEstimatedHours.isNaN() || totalEstimatedHours < 0) return false
+        if (steps.length() < 1) return false
+        for (i in 0 until steps.length()) {
+            val obj = steps.optJSONObject(i) ?: return false
+            if (!hasRequiredStepFields(obj)) return false
+        }
+        return true
+    }
+
+    private fun hasRequiredStepFields(obj: JSONObject): Boolean {
+        val title = obj.optString("title").trim()
+        if (title.isEmpty()) return false
+        val description = obj.optString("description").trim()
+            .ifBlank { obj.optString("details").trim() }
+        if (description.isEmpty()) return false
+        if (!obj.has("estimatedHours") || obj.isNull("estimatedHours")) return false
+        val hours = obj.optDouble("estimatedHours")
+        if (hours.isNaN()) return false
+        val recommendedDate = obj.optString("recommendedDate").trim()
+            .ifBlank { obj.optString("date").trim() }
+            .ifBlank { obj.optString("recommended_date").trim() }
+        if (recommendedDate.isEmpty()) return false
+        val priority = obj.optString("priority").trim()
+            .ifBlank { obj.optString("priorityLabel").trim() }
+        if (priority.isEmpty()) return false
+        return true
+    }
+}
+
 object RoadmapProgress {
     data class Summary(val completed: Int, val total: Int) {
         val percent: Int = if (total <= 0) 0 else ((completed.toDouble() / total.toDouble()) * 100.0).toInt()
