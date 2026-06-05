@@ -33,11 +33,23 @@ object WeekAheadWork {
         var total = 0.0
         for (task in tasks) {
             if (task.status == TaskStatus.COMPLETE) continue
-            if (TaskKind.isSimpleTask(task)) continue
+            if (TaskKind.isSimpleTask(task)) {
+                val planOn = TodayPlanWork.simpleTaskPlanLocalDate(task) ?: continue
+                if (planOn == day) total += TodayPlanWork.SIMPLE_TASK_HOURS
+                continue
+            }
             total += plannedRoadmapHoursForSteps(RoadmapStep.parseList(task.roadmap), day)
         }
         return total
     }
+
+    /** Calendar day used for week-ahead grouping: plan day for simple tasks, due day otherwise. */
+    fun taskWeekAheadDay(task: SupabaseTasksApi.TaskRow): LocalDate? =
+        if (TaskKind.isSimpleTask(task)) {
+            TodayPlanWork.simpleTaskPlanLocalDate(task)
+        } else {
+            task.dueDate?.toLocalDate()
+        }
 
     fun plannedRoadmapHoursForSteps(steps: List<RoadmapStep>, day: LocalDate): Double {
         var total = 0.0
@@ -99,9 +111,10 @@ object WeekAheadWork {
                 date = day,
                 plannedHours = plannedRoadmapHoursForDay(tasks, day),
                 tasksDue = dueTasks
-                    .filter { it.dueDate?.toLocalDate() == day }
+                    .filter { taskWeekAheadDay(it) == day }
                     .sortedWith(
-                        compareBy<SupabaseTasksApi.TaskRow> { it.dueDate }
+                        compareBy<SupabaseTasksApi.TaskRow> { taskWeekAheadDay(it) }
+                            .thenBy { it.dueDate }
                             .thenBy { it.title.lowercase() },
                     ),
             )

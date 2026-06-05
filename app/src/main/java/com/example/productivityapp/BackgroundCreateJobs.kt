@@ -5,7 +5,9 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executors
 import org.json.JSONArray
@@ -149,6 +151,10 @@ object BackgroundCreateJobs {
                         ),
                     )
 
+                    val today = LocalDate.now(ZoneId.systemDefault())
+                    val dueDate = due.toLocalDate()
+                    val existingWorkload = ExistingWorkload.loadForRange(accessToken, today, dueDate)
+
                     val roadmapSteps = when (
                         val roadmapResult = SupabaseEdgeFunctionsApi.getRoadmap(
                             accessToken = accessToken,
@@ -165,6 +171,7 @@ object BackgroundCreateJobs {
                             school = profileContext.first,
                             yearInSchool = profileContext.second,
                             userEstimatedHours = userEstimatedHours,
+                            existingWorkload = existingWorkload,
                         )
                     ) {
                         is SupabaseEdgeFunctionsApi.RoadmapResult.Success -> roadmapResult.steps

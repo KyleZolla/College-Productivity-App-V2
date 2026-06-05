@@ -5,6 +5,7 @@ import org.json.JSONObject
 import android.util.Log
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.ZoneId
 
 object SupabaseEdgeFunctionsApi {
 
@@ -40,11 +41,13 @@ object SupabaseEdgeFunctionsApi {
         school: String? = null,
         yearInSchool: String? = null,
         userEstimatedHours: Double? = null,
+        existingWorkload: Map<String, Double> = emptyMap(),
     ): RoadmapResult {
         if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
             return RoadmapResult.Failure("Missing Supabase config.")
         }
         val payload = JSONObject()
+            .put("timeZone", ZoneId.systemDefault().id)
             .put("title", title)
             .put("dueDate", dueDateIso)
             .put("assignmentType", assignmentType ?: JSONObject.NULL)
@@ -65,6 +68,12 @@ object SupabaseEdgeFunctionsApi {
 
         val estimateFeedbackHistory = loadEstimateFeedbackHistory(accessToken)
         payload.put("estimateFeedbackHistory", estimateFeedbackHistory)
+
+        val existingWorkloadJson = JSONObject()
+        for ((date, hours) in existingWorkload) {
+            existingWorkloadJson.put(date, hours)
+        }
+        payload.put("existingWorkload", existingWorkloadJson)
 
         val base = BuildConfig.SUPABASE_URL.trimEnd('/')
         val primary = callRoadmapFunction(base, PRIMARY_ROADMAP_FUNCTION_SLUG, accessToken, payload)

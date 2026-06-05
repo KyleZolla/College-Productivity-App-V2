@@ -2,6 +2,7 @@ package com.example.productivityapp
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -74,11 +75,31 @@ class WeekAheadWorkTest {
     }
 
     @Test
-    fun plannedHours_ignoresSimpleTasks() {
+    fun plannedHours_includesSimpleTasksOnPlanDay() {
         val tasks = listOf(
-            task("1", "Simple", due = LocalDateTime.of(today, LocalTime.NOON)),
+            task("1", "Simple", due = LocalDateTime.of(today, LocalTime.of(15, 0))),
         )
-        assertEquals(0.0, WeekAheadWork.totalPlannedRoadmapHours(tasks, today), 0.001)
+        assertEquals(
+            TodayPlanWork.SIMPLE_TASK_HOURS,
+            WeekAheadWork.totalPlannedRoadmapHours(tasks, today),
+            0.001,
+        )
+    }
+
+    @Test
+    fun dayBreakdown_placesSimpleTaskOnPlanDayNotDueDay() {
+        val dueDay = today.plusDays(2)
+        val tasks = listOf(
+            task("1", "Morning due", due = LocalDateTime.of(dueDay, LocalTime.of(10, 0))),
+        )
+        val breakdown = WeekAheadWork.computeSummary(tasks, today).dayBreakdowns
+        val planDay = TodayPlanWork.simpleTaskPlanLocalDate(tasks[0])!!
+        val planBlock = breakdown.first { it.date == planDay }
+        val dueBlock = breakdown.first { it.date == dueDay }
+        assertEquals(1, planBlock.tasksDue.size)
+        assertEquals("1", planBlock.tasksDue.first().id)
+        assertTrue(dueBlock.tasksDue.isEmpty())
+        assertEquals(TodayPlanWork.SIMPLE_TASK_HOURS, planBlock.plannedHours, 0.001)
     }
 
     @Test
@@ -94,9 +115,11 @@ class WeekAheadWorkTest {
     }
 
     @Test
-    fun busiestDay_returnsNullWhenNoHours() {
-        val tasks = listOf(task("1", "Simple", due = LocalDateTime.of(today, LocalTime.NOON)))
-        assertNull(WeekAheadWork.busiestDay(tasks, today))
+    fun busiestDay_includesSimpleTaskHours() {
+        val tasks = listOf(task("1", "Simple", due = LocalDateTime.of(today, LocalTime.of(15, 0))))
+        val busiest = WeekAheadWork.busiestDay(tasks, today)
+        assertEquals(today, busiest?.first)
+        assertEquals(TodayPlanWork.SIMPLE_TASK_HOURS, busiest?.second ?: 0.0, 0.001)
     }
 
     @Test
