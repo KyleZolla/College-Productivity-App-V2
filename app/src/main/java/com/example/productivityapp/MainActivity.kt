@@ -458,13 +458,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchGoogleOAuth(statusText: TextView) {
-        if (BuildConfig.SUPABASE_URL.isBlank() || BuildConfig.SUPABASE_ANON_KEY.isBlank()) {
+        val authUrl = GoogleOAuth.buildAuthorizeUrl(this)
+        if (authUrl == null) {
             statusText.showAuthMessage(getString(R.string.status_missing_config), AuthMessageTone.ERROR)
             return
         }
-
-        val redirectTo = Uri.encode(getString(R.string.oauth_redirect_url))
-        val authUrl = "${BuildConfig.SUPABASE_URL.trimEnd('/')}/auth/v1/authorize?provider=google&redirect_to=$redirectTo&flow_type=implicit"
         statusText.showAuthMessage(getString(R.string.status_google_opening), AuthMessageTone.INSTRUCTION)
 
         try {
