@@ -152,12 +152,22 @@ object WeekAheadWork {
         return when (java.time.temporal.ChronoUnit.DAYS.between(today, dueDay)) {
             0L -> "today"
             1L -> "tomorrow"
-            else -> dueDay.dayOfWeek.getDisplayName(
-                java.time.format.TextStyle.FULL,
-                java.util.Locale.getDefault(),
-            )
+            else -> weekdayLabel(dueDay)
         }
     }
+
+    fun weekAheadDayLabel(date: LocalDate, today: LocalDate): String =
+        when (java.time.temporal.ChronoUnit.DAYS.between(today, date)) {
+            0L -> "Today"
+            1L -> "Tomorrow"
+            else -> weekdayLabel(date)
+        }
+
+    private fun weekdayLabel(date: LocalDate): String =
+        date.dayOfWeek.getDisplayName(
+            java.time.format.TextStyle.FULL,
+            java.util.Locale.getDefault(),
+        )
 
     private fun stepHours(step: RoadmapStep): Double =
         step.estimatedHours?.takeIf { !it.isNaN() && it > 0.0 } ?: 0.0

@@ -1202,7 +1202,11 @@ class HomeActivity : AppCompatActivity() {
         val byKey = entries.associateBy { todayPlanEntryKey(it) }
         homeTodayPlanPinnedCheckedKeys.removeAll { key ->
             val e = byKey[key]
-            e == null || !e.isCompleted
+            when {
+                e == null || !e.isCompleted -> true
+                e.isSimple -> true
+                else -> estimateFeedbackKey(e.task.id, e.stepIndex) in estimateFeedbackAnsweredKeys
+            }
         }
     }
 
@@ -1213,19 +1217,27 @@ class HomeActivity : AppCompatActivity() {
     ): List<TodayPlanEntry> {
         prunePinnedTodayPlanKeys(scopeEntries)
         val sorted = sortTodayPlanEntries(workEntries, today)
-        val pinnedKeys = homeTodayPlanPinnedCheckedKeys
-        var uncheckedShown = 0
+        val scopeByKey = scopeEntries.associateBy { todayPlanEntryKey(it) }
         val out = ArrayList<TodayPlanEntry>()
+        var uncheckedShown = 0
         for (entry in sorted) {
-            when {
-                !entry.isCompleted && uncheckedShown < 2 -> {
-                    out.add(entry)
-                    uncheckedShown++
-                }
-                entry.isCompleted && todayPlanEntryKey(entry) in pinnedKeys -> out.add(entry)
+            if (!entry.isCompleted && uncheckedShown < 2) {
+                out.add(entry)
+                uncheckedShown++
             }
         }
-        return out.sortedWith(compareBy({ !it.isSimple }, { sorted.indexOfFirst { e -> todayPlanEntryKey(e) == todayPlanEntryKey(it) } }))
+        var pinnedShown = 0
+        for (key in homeTodayPlanPinnedCheckedKeys.toList().asReversed()) {
+            if (pinnedShown >= 2) break
+            val entry = scopeByKey[key] ?: continue
+            if (!entry.isCompleted) continue
+            val entryKey = todayPlanEntryKey(entry)
+            if (out.any { todayPlanEntryKey(it) == entryKey }) continue
+            out.add(entry)
+            pinnedShown++
+        }
+        val rank = sorted.withIndex().associate { (i, e) -> todayPlanEntryKey(e) to i }
+        return out.sortedBy { rank[todayPlanEntryKey(it)] ?: Int.MAX_VALUE }
     }
 
     private fun pruneGetAheadPinnedKeys(futureEntries: List<TodayPlanEntry>) {
@@ -2474,10 +2486,7 @@ class HomeActivity : AppCompatActivity() {
             WeekAheadWork.formatPlannedHours(summary.totalPlannedHours),
         )
         homeWeekAheadBusiestLine.text = if (summary.busiestDayHours > 0.0 && summary.busiestDay != null) {
-            val dayName = summary.busiestDay.dayOfWeek.getDisplayName(
-                java.time.format.TextStyle.FULL,
-                Locale.getDefault(),
-            )
+            val dayName = WeekAheadWork.weekAheadDayLabel(summary.busiestDay, today)
             getString(
                 R.string.home_week_ahead_busiest_day,
                 dayName,
@@ -2514,14 +2523,7 @@ class HomeActivity : AppCompatActivity() {
         for (day in breakdowns) {
             val block = inflater.inflate(R.layout.item_home_week_ahead_day, homeWeekAheadExpandedHost, false)
             val title = block.findViewById<TextView>(R.id.homeWeekAheadDayTitle)
-            title.text = if (day.date == today) {
-                getString(R.string.home_week_ahead_day_today)
-            } else {
-                day.date.dayOfWeek.getDisplayName(
-                    java.time.format.TextStyle.FULL,
-                    Locale.getDefault(),
-                )
-            }
+            title.text = WeekAheadWork.weekAheadDayLabel(day.date, today)
             val hoursLine = block.findViewById<TextView>(R.id.homeWeekAheadDayHours)
             hoursLine.text = if (day.plannedHours > 0.0) {
                 getString(

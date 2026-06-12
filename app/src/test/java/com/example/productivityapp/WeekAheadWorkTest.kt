@@ -146,6 +146,13 @@ class WeekAheadWorkTest {
     }
 
     @Test
+    fun weekAheadDayLabel_usesTodayTomorrowOrWeekday() {
+        assertEquals("Today", WeekAheadWork.weekAheadDayLabel(today, today))
+        assertEquals("Tomorrow", WeekAheadWork.weekAheadDayLabel(today.plusDays(1), today))
+        assertEquals("Wednesday", WeekAheadWork.weekAheadDayLabel(today.plusDays(2), today))
+    }
+
+    @Test
     fun dueDayLabel_usesTodayTomorrowOrWeekday() {
         val dueToday = LocalDateTime.of(today, LocalTime.NOON)
         val dueTomorrow = LocalDateTime.of(today.plusDays(1), LocalTime.NOON)
