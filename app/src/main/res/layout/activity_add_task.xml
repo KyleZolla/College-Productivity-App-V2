@@ -71,6 +71,7 @@
                 android:autofillHints="none"
                 android:hint="@string/task_title_hint"
                 android:inputType="textCapSentences"
+                android:maxLength="200"
                 android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
 
             <LinearLayout
@@ -450,7 +451,8 @@
                         android:id="@+id/addTaskEstimatedHoursInput"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:inputType="numberDecimal" />
+                        android:inputType="numberDecimal"
+                        android:maxLength="6" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.textfield.TextInputLayout
@@ -465,6 +467,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:inputType="textMultiLine"
+                        android:maxLength="4000"
                         android:minLines="3"
                         android:maxLines="6" />
                 </com.google.android.material.textfield.TextInputLayout>

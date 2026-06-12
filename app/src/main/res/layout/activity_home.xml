@@ -606,7 +606,8 @@
                             android:id="@+id/profileSchoolInput"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:inputType="textCapWords" />
+                            android:inputType="textCapWords"
+                            android:maxLength="120" />
                     </com.google.android.material.textfield.TextInputLayout>
 
                     <com.google.android.material.textfield.TextInputLayout

@@ -37,7 +37,8 @@
                 android:layout_marginTop="16dp"
                 android:autofillHints="emailAddress"
                 android:hint="@string/email_hint"
-                android:inputType="textEmailAddress" />
+                android:inputType="textEmailAddress"
+                android:maxLength="254" />
 
             <EditText
                 android:id="@+id/loginPasswordInput"
@@ -46,7 +47,8 @@
                 android:layout_marginTop="12dp"
                 android:autofillHints="password"
                 android:hint="@string/password_hint"
-                android:inputType="textPassword" />
+                android:inputType="textPassword"
+                android:maxLength="72" />
 
             <TextView
                 android:id="@+id/loginStatusText"
